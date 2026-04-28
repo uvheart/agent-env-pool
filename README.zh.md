@@ -10,7 +10,7 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 
 **无需本地构建**，新建 `docker-compose.yml` 文件，粘贴以下内容。
 
-> **国内用户**：将镜像地址换成 `registry.cn-hangzhou.aliyuncs.com/uvheart280/agent-env-pool:latest` 可直接拉取，无需翻墙、无需登录（公开仓库）。
+> **国内用户**：如果拉取 Docker Hub 镜像超时，可配置镜像加速器（见下方说明）。
 
 
 ```yaml
@@ -39,6 +39,25 @@ docker compose up -d
 ```
 
 > 镜像托管在 Docker Hub，国内可配合镜像加速器使用，无需翻墙。
+
+### 国内镜像加速配置
+
+如果 `docker pull` 超时，在服务器上执行以下命令配置加速器，**一次配置永久生效**：
+
+```bash
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "registry-mirrors": [
+    "https://dockerproxy.cn",
+    "https://docker.m.daocloud.io"
+  ]
+}
+EOF
+sudo systemctl daemon-reload && sudo systemctl restart docker
+```
+
+配置后重新执行 `docker compose up -d` 即可。
 
 ### 启动一个浏览器沙箱
 
