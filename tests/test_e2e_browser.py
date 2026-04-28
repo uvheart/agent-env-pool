@@ -19,8 +19,8 @@ import websockets
 from agent_env_pool.app import app
 from agent_env_pool.core.database import init_db
 
-BROWSER_IMAGE = "browser-use-chrome:latest"
-CDP_CONTAINER_PORT = 9223  # reverse proxy port exposed by browser-use-chrome
+BROWSER_IMAGE = "zenika/alpine-chrome:124"
+CDP_CONTAINER_PORT = 9222
 SCREENSHOT_PATH = Path(__file__).parent / "screenshot_baidu.png"
 
 CONTAINER_READY_TIMEOUT = 60
@@ -172,6 +172,14 @@ async def test_full_lifecycle(api: httpx.AsyncClient):
                     "ready_check": {"type": "cdp"},
                 }
             ],
+            "metadata": {
+                "command": [
+                    "--no-sandbox",
+                    "--remote-debugging-address=0.0.0.0",
+                    f"--remote-debugging-port={CDP_CONTAINER_PORT}",
+                    "about:blank",
+                ]
+            },
         })
         assert boot_resp.status_code == 200, f"boot failed: {boot_resp.text}"
 

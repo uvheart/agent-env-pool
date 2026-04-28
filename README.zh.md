@@ -67,7 +67,7 @@ python -m agent_env_pool --host 0.0.0.0 --port 8100
 ### 第一步：拉取浏览器沙箱镜像
 
 ```bash
-docker pull browser-use-chrome:latest
+docker pull zenika/alpine-chrome:124
 ```
 
 > 自行构建 `browser-use-chrome`，或任何在 `9223` 端口暴露 CDP 的镜像均可。
@@ -79,10 +79,18 @@ SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
+    "image": "zenika/alpine-chrome:124",
     "endpoints": [
-      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
-    ]
+      {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    ],
+    "metadata": {
+      "command": [
+        "--no-sandbox",
+        "--remote-debugging-address=0.0.0.0",
+        "--remote-debugging-port=9222",
+        "about:blank"
+      ]
+    }
   }')
 
 echo $SERVER
@@ -130,9 +138,9 @@ curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
+    "image": "zenika/alpine-chrome:124",
     "endpoints": [
-      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+      {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
   }'
 ```
@@ -158,7 +166,7 @@ curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
 # 优先复用空闲沙箱，无可用时自动启动新沙箱
 curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
   -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","image":"browser-use-chrome:latest","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
+  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
 
 # 用完释放回空闲池
 curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
@@ -172,8 +180,8 @@ curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
   -d '{
     "count": 4,
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
-    "endpoints": [{"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
+    "image": "zenika/alpine-chrome:124",
+    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
   }'
 
 curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
@@ -202,7 +210,7 @@ from agent_env_pool import EnvPoolClient
 pool = EnvPoolClient("http://127.0.0.1:8100")
 
 with pool.acquire(endpoints=[
-    {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
 ]) as env:
     print(env.server_id)
     print(env.cdp_url)   # 在此连接你的 Agent
@@ -212,7 +220,7 @@ with pool.acquire(endpoints=[
 
 | 沙箱类型 | 镜像示例 | 端点 |
 |---|---|---|
-| Chrome / 浏览器自动化 | `browser-use-chrome:latest` | CDP on `9223` |
+| Chrome / 浏览器自动化 | `zenika/alpine-chrome:124` | CDP on `9223` |
 | Playwright / 爬虫 | 任意 | HTTP 或 WebSocket |
 | VS Code / code-server | `codercom/code-server` | HTTP |
 | VNC 桌面 | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |

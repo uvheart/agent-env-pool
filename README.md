@@ -65,7 +65,7 @@ python -m agent_env_pool --host 0.0.0.0 --port 8100
 ### Step 1 — Pull the browser sandbox image
 
 ```bash
-docker pull browser-use-chrome:latest
+docker pull zenika/alpine-chrome:124
 ```
 
 > Build `browser-use-chrome` yourself or use any image that exposes a CDP port on `9223`.
@@ -77,10 +77,18 @@ SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
+    "image": "zenika/alpine-chrome:124",
     "endpoints": [
-      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
-    ]
+      {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    ],
+    "metadata": {
+      "command": [
+        "--no-sandbox",
+        "--remote-debugging-address=0.0.0.0",
+        "--remote-debugging-port=9222",
+        "about:blank"
+      ]
+    }
   }')
 
 echo $SERVER
@@ -128,9 +136,9 @@ curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
+    "image": "zenika/alpine-chrome:124",
     "endpoints": [
-      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+      {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
   }'
 ```
@@ -156,7 +164,7 @@ Custom image with HTTP + TCP endpoints:
 # Reuses an idle sandbox if available, otherwise boots a new one
 curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
   -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","image":"browser-use-chrome:latest","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
+  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
 
 # Release back to the idle pool
 curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
@@ -170,8 +178,8 @@ curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
   -d '{
     "count": 4,
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
-    "endpoints": [{"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
+    "image": "zenika/alpine-chrome:124",
+    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
   }'
 
 curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
@@ -200,7 +208,7 @@ from agent_env_pool import EnvPoolClient
 pool = EnvPoolClient("http://127.0.0.1:8100")
 
 with pool.acquire(endpoints=[
-    {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
 ]) as env:
     print(env.server_id)
     print(env.cdp_url)   # connect your agent here
@@ -210,7 +218,7 @@ with pool.acquire(endpoints=[
 
 | Sandbox type | Image | Endpoint |
 |---|---|---|
-| Chrome / browser automation | `browser-use-chrome:latest` | CDP on `9223` |
+| Chrome / browser automation | `zenika/alpine-chrome:124` | CDP on `9223` |
 | Playwright / scraping | any | HTTP or WebSocket |
 | VS Code / code-server | `codercom/code-server` | HTTP |
 | VNC desktop | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |

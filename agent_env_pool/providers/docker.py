@@ -52,8 +52,7 @@ class DockerProvider:
             for endpoint in endpoint_specs
         }
 
-        container = self.client.containers.run(
-            image,
+        run_kwargs: dict = dict(
             detach=True,
             name=name,
             ports=port_bindings,
@@ -61,6 +60,10 @@ class DockerProvider:
             shm_size=metadata.get("shm_size", "1g"),
             environment=metadata.get("environment", {}),
         )
+        if metadata.get("command"):
+            run_kwargs["command"] = metadata["command"]
+
+        container = self.client.containers.run(image, **run_kwargs)
         container.reload()
 
         host = self.settings.public_host
