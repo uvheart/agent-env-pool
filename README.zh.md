@@ -10,7 +10,7 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 
 **无需本地构建**，新建 `docker-compose.yml` 文件，粘贴以下内容。
 
-> **国内用户**：将镜像地址换成 `registry.cn-hangzhou.aliyuncs.com/uvheart280/agent-env-pool:latest` 可直接拉取，无需翻墙。
+> **国内用户**：将镜像地址换成 `registry.cn-hangzhou.aliyuncs.com/uvheart280/agent-env-pool:latest` 可直接拉取，无需翻墙、无需登录（公开仓库）。
 
 
 ```yaml
