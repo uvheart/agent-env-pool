@@ -8,33 +8,24 @@ It focuses on one thing for V0.1: reliably creating, tracking, and releasing Doc
 
 ## Quickstart
 
-**No build needed.** Create a `docker-compose.yml` and start.
-
-> **China users:** replace `uvheart280/agent-env-pool:latest` with `registry.cn-hangzhou.aliyuncs.com/uvheart280/agent-env-pool:latest` to avoid Docker Hub connectivity issues.
-
-
-```yaml
-services:
-  agent-env-pool:
-    image: uvheart280/agent-env-pool:latest
-    ports:
-      - "8100:8100"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./data:/app/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      AGENT_ENV_POOL_DATABASE_URL: "sqlite+aiosqlite:///./data/agent_env_pool.db"
-      AGENT_ENV_POOL_DOCKER_BROWSER_IMAGE: "browser-use-chrome:latest"
-      AGENT_ENV_POOL_DOCKER_BROWSER_PORT: "9223"
-      AGENT_ENV_POOL_PUBLIC_HOST: "127.0.0.1"
-      AGENT_ENV_POOL_DOCKER_READY_HOST: "host.docker.internal"
-```
+One command to start the service:
 
 ```bash
-docker compose up -d
+docker run -d \
+  --name agent-env-pool \
+  -p 8100:8100 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --add-host host.docker.internal:host-gateway \
+  uvheart280/agent-env-pool:latest
 ```
+
+Verify it's running:
+
+```bash
+curl http://127.0.0.1:8100/api/v1/servers
+```
+
+That's it. The sandbox image is specified per-request when you call the API — nothing to pre-configure.
 
 Boot one browser sandbox:
 

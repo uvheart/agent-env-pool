@@ -8,56 +8,26 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 
 ## 快速开始
 
-**无需本地构建**，新建 `docker-compose.yml` 文件，粘贴以下内容。
-
-> **国内用户**：如果拉取 Docker Hub 镜像超时，可配置镜像加速器（见下方说明）。
-
-
-```yaml
-services:
-  agent-env-pool:
-    image: uvheart280/agent-env-pool:latest
-    ports:
-      - "8100:8100"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./data:/app/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      AGENT_ENV_POOL_DATABASE_URL: "sqlite+aiosqlite:///./data/agent_env_pool.db"
-      AGENT_ENV_POOL_DOCKER_BROWSER_IMAGE: "browser-use-chrome:latest"
-      AGENT_ENV_POOL_DOCKER_BROWSER_PORT: "9223"
-      AGENT_ENV_POOL_PUBLIC_HOST: "127.0.0.1"
-      AGENT_ENV_POOL_DOCKER_READY_HOST: "host.docker.internal"
-```
-
-然后启动：
+一行命令启动服务：
 
 ```bash
-docker compose up -d
+docker run -d \
+  --name agent-env-pool \
+  -p 8100:8100 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --add-host host.docker.internal:host-gateway \
+  uvheart280/agent-env-pool:latest
 ```
 
-> 镜像托管在 Docker Hub，国内可配合镜像加速器使用，无需翻墙。
+> 国内如果拉取超时，先配置 Docker 代理或镜像加速器（见下方）。
 
-### 国内镜像加速配置
-
-如果 `docker pull` 超时，在服务器上执行以下命令配置加速器，**一次配置永久生效**：
+验证服务已启动：
 
 ```bash
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json <<'EOF'
-{
-  "registry-mirrors": [
-    "https://dockerproxy.cn",
-    "https://docker.m.daocloud.io"
-  ]
-}
-EOF
-sudo systemctl daemon-reload && sudo systemctl restart docker
+curl http://127.0.0.1:8100/api/v1/servers
 ```
 
-配置后重新执行 `docker compose up -d` 即可。
+就这样，服务跑起来了。接下来按需调 API，沙箱镜像由你在请求里指定。
 
 ### 启动一个浏览器沙箱
 
