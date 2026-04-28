@@ -8,7 +8,7 @@ It focuses on one thing for V0.1: reliably creating, tracking, and releasing Doc
 
 ## Quickstart
 
-One command to start the service:
+### Step 1 — Start the service
 
 ```bash
 docker run -d \
@@ -20,37 +20,42 @@ docker run -d \
   uvheart280/agent-env-pool:latest
 ```
 
-Verify it's running:
+### Step 2 — Pull a sandbox image
+
+`agent-env-pool` is the scheduling layer only. Bring your own sandbox image and pull it to the host first:
 
 ```bash
-curl http://127.0.0.1:8100/api/v1/servers
+# Example: browser sandbox from the browser-use project
+docker pull browseruse/chrome:latest
 ```
 
-That's it. The sandbox image is specified per-request when you call the API — nothing to pre-configure.
+Any image that exposes a known port works.
 
-> **Note:** `agent-env-pool` is only the scheduling layer. Sandbox images must already be present on the host (`docker pull` them first). You specify the image name in each API request.
-
-Boot a sandbox with any image:
+### Step 3 — Boot a sandbox
 
 ```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
+SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
+    "image": "browseruse/chrome:latest",
     "endpoints": [
       {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
-  }'
+  }')
+echo $SERVER
 ```
 
-Boot 10 sandboxes for rollout:
+The response contains `server_id` and `cdp_url` ready to connect to.
+
+### Step 4 — Shut it down
 
 ```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
-  -H 'content-type: application/json' \
-  -d '{"count": 10, "image": "your-sandbox:latest", "endpoints": [...]}'
+SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['server_id'])")
+curl -s -X POST "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
+
+That's the full boot → use → shutdown cycle.
 
 ## V0.1 Scope
 

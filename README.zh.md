@@ -8,7 +8,7 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 
 ## 快速开始
 
-一行命令启动服务：
+### 第一步：启动服务
 
 ```bash
 docker run -d \
@@ -22,57 +22,42 @@ docker run -d \
 
 > 国内如果拉取超时，先配置 Docker 代理或镜像加速器（见下方）。
 
-验证服务已启动：
+### 第二步：准备沙箱镜像
+
+`agent-env-pool` 只负责调度，沙箱镜像由你提供。先把需要的镜像拉到宿主机：
 
 ```bash
-curl http://127.0.0.1:8100/api/v1/servers
+# 以浏览器沙箱为例（使用 browser-use 项目提供的 Chrome 镜像）
+docker pull browseruse/chrome:latest
 ```
 
-就这样，服务跑起来了。
+也可以用任何你自己的镜像，只要它暴露了你需要的端口即可。
 
-> **注意**：`agent-env-pool` 只是沙箱的调度层，沙箱镜像需要你自己准备并预先 `docker pull` 到宿主机。启动沙箱时在请求里指定镜像名即可。
-
-### 启动一个沙箱
-
-以任意已有镜像为例（这里用 `nginx`）：
+### 第三步：验证——启动一个沙箱
 
 ```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
-  -H 'content-type: application/json' \
-  -d '{
-    "env_type": "custom",
-    "image": "nginx:latest",
-    "endpoints": [
-      {"name": "web", "container_port": 80, "protocol": "http", "ready_check": {"type": "http", "path": "/"}}
-    ]
-  }'
-```
-
-如果你用的是浏览器沙箱（`browser-use-chrome`），需要先在宿主机上构建或拉取该镜像，再指定给 API：
-
-```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
+SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browser-use-chrome:latest",
+    "image": "browseruse/chrome:latest",
     "endpoints": [
       {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
-  }'
+  }')
+echo $SERVER
 ```
 
-### 批量启动沙箱（用于 rollout）
+响应中包含 `server_id` 和 `cdp_url`，用于连接浏览器。
+
+### 第四步：关闭沙箱
 
 ```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
-  -H 'content-type: application/json' \
-  -d '{
-    "count": 10,
-    "image": "your-sandbox:latest",
-    "endpoints": [...]
-  }'
+SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['server_id'])")
+curl -s -X POST "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
+
+至此完成完整的启动→使用→关闭流程。
 
 ## V0.1 功能范围
 
