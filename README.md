@@ -8,7 +8,10 @@ It focuses on one thing for V0.1: reliably creating, tracking, and releasing Doc
 
 ## Quickstart
 
-**No build needed.** Create a `docker-compose.yml` and start:
+**No build needed.** Create a `docker-compose.yml` and start.
+
+> **China users:** replace `uvheart280/agent-env-pool:latest` with `registry.cn-hangzhou.aliyuncs.com/uvheart280/agent-env-pool:latest` to avoid Docker Hub connectivity issues.
+
 
 ```yaml
 services:
