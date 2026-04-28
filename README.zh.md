@@ -1,5 +1,7 @@
 # agent-env-pool
 
+[English](./README.md)
+
 `agent-env-pool` 是一个轻量级单节点 Docker 沙箱池，专为 Agent RL rollout 设计。
 
 V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研究者不再需要手动处理 Docker 端点、端口、配额和清理工作。

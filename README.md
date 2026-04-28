@@ -1,5 +1,7 @@
 # agent-env-pool
 
+[中文文档](./README.zh.md)
+
 `agent-env-pool` is a lightweight single-node Docker sandbox pool for Agent RL rollout.
 
 It focuses on one thing for V0.1: reliably creating, tracking, and releasing Docker sandboxes so researchers can spend less time on Docker endpoints, ports, quota, and cleanup.
