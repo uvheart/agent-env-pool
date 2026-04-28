@@ -16,6 +16,7 @@ docker run -d \
   -p 8100:8100 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --add-host host.docker.internal:host-gateway \
+  -e AGENT_ENV_POOL_DOCKER_READY_HOST=host.docker.internal \
   uvheart280/agent-env-pool:latest
 ```
 
