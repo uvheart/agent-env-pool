@@ -27,19 +27,29 @@ curl http://127.0.0.1:8100/api/v1/servers
 
 That's it. The sandbox image is specified per-request when you call the API — nothing to pre-configure.
 
-Boot one browser sandbox:
+> **Note:** `agent-env-pool` is only the scheduling layer. Sandbox images must already be present on the host (`docker pull` them first). You specify the image name in each API request.
+
+Boot a sandbox with any image:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot -H 'content-type: application/json' -d '{}'
+curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "browser-use",
+    "image": "browser-use-chrome:latest",
+    "endpoints": [
+      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    ]
+  }'
 ```
 
-Boot 10 browser sandboxes for rollout:
+Boot 10 sandboxes for rollout:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8100/api/v1/rollout/boot -H 'content-type: application/json' -d '{"count":10}'
+curl -s -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
+  -H 'content-type: application/json' \
+  -d '{"count": 10, "image": "your-sandbox:latest", "endpoints": [...]}'
 ```
-
-The response returns Docker-assigned endpoint URLs, for example `data.cdp_url` and `data.endpoints[0].url`. The default browser image is `browser-use-chrome:latest`, and its CDP endpoint is expected on container port `9223`.
 
 ## V0.1 Scope
 

@@ -27,23 +27,51 @@ docker run -d \
 curl http://127.0.0.1:8100/api/v1/servers
 ```
 
-就这样，服务跑起来了。接下来按需调 API，沙箱镜像由你在请求里指定。
+就这样，服务跑起来了。
 
-### 启动一个浏览器沙箱
+> **注意**：`agent-env-pool` 只是沙箱的调度层，沙箱镜像需要你自己准备并预先 `docker pull` 到宿主机。启动沙箱时在请求里指定镜像名即可。
+
+### 启动一个沙箱
+
+以任意已有镜像为例（这里用 `nginx`）：
 
 ```bash
 curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
-  -H 'content-type: application/json' -d '{}'
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "custom",
+    "image": "nginx:latest",
+    "endpoints": [
+      {"name": "web", "container_port": 80, "protocol": "http", "ready_check": {"type": "http", "path": "/"}}
+    ]
+  }'
 ```
 
-### 批量启动 10 个浏览器沙箱（用于 rollout）
+如果你用的是浏览器沙箱（`browser-use-chrome`），需要先在宿主机上构建或拉取该镜像，再指定给 API：
+
+```bash
+curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "browser-use",
+    "image": "browser-use-chrome:latest",
+    "endpoints": [
+      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    ]
+  }'
+```
+
+### 批量启动沙箱（用于 rollout）
 
 ```bash
 curl -s -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
-  -H 'content-type: application/json' -d '{"count":10}'
+  -H 'content-type: application/json' \
+  -d '{
+    "count": 10,
+    "image": "your-sandbox:latest",
+    "endpoints": [...]
+  }'
 ```
-
-响应中包含 Docker 分配的端点 URL，例如 `data.cdp_url` 和 `data.endpoints[0].url`。默认浏览器镜像为 `browser-use-chrome:latest`，其 CDP 端点监听在容器端口 `9223`。
 
 ## V0.1 功能范围
 
