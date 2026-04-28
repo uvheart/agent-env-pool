@@ -1,14 +1,31 @@
-# agent-env-pool
+<p align="center">
+  <img src="./pic/logo.png" alt="agent-env-pool" width="120" />
+</p>
 
-[中文文档](./README.zh.md)
+<h1 align="center">agent-env-pool</h1>
 
-`agent-env-pool` is a lightweight single-node Docker sandbox pool for Agent RL rollout.
+<p align="center">
+  A lightweight single-node Docker sandbox pool for Agent RL rollout.
+</p>
 
-It focuses on one thing for V0.1: reliably creating, tracking, and releasing Docker sandboxes so researchers can spend less time on Docker endpoints, ports, quota, and cleanup.
+<p align="center">
+  <a href="https://hub.docker.com/r/uvheart280/agent-env-pool"><img src="https://img.shields.io/docker/v/uvheart280/agent-env-pool?label=docker&color=blue" alt="Docker" /></a>
+  <a href="./README.zh.md">中文文档</a>
+</p>
 
-## Quickstart
+<p align="center">
+  <img src="./pic/index.png" alt="agent-env-pool overview" width="800" />
+</p>
 
-### Step 1 — Start the service
+---
+
+`agent-env-pool` does one thing well: reliably boot, track, and release Docker sandboxes so researchers spend less time wiring up Docker endpoints, ports, quota, and cleanup.
+
+## Installation
+
+### Option A — Docker (recommended)
+
+No Python setup needed. Requires Docker.
 
 ```bash
 docker run -d \
@@ -20,33 +37,80 @@ docker run -d \
   uvheart280/agent-env-pool:latest
 ```
 
-### Step 2 — Pull a sandbox image
-
-`agent-env-pool` is the scheduling layer only. Bring your own sandbox image and pull it to the host first:
+Verify:
 
 ```bash
-# Example: browser sandbox from the browser-use project
-docker pull browseruse/chrome:latest
+curl http://127.0.0.1:8100/api/v1/servers
+# {"meta":{"trace_id":"..."},"data":{"items":[],"total":0}}
 ```
 
-Any image that exposes a known port works.
+### Option B — From source
 
-### Step 3 — Boot a sandbox
+```bash
+git clone https://github.com/uvheart/agent-env-pool.git
+cd agent-env-pool
+
+conda create -n agent-env-pool python=3.11 -y
+conda activate agent-env-pool
+
+pip install -r requirements.txt
+
+python -m agent_env_pool --host 0.0.0.0 --port 8100
+```
+
+## Quickstart
+
+> **Prerequisites:** `agent-env-pool` is the scheduling layer only. Your sandbox image must already exist on the host.
+
+### Step 1 — Pull the browser sandbox image
+
+```bash
+docker pull browser-use-chrome:latest
+```
+
+> Build `browser-use-chrome` yourself or use any image that exposes a CDP port on `9223`.
+
+### Step 2 — Boot a browser sandbox
 
 ```bash
 SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browseruse/chrome:latest",
+    "image": "browser-use-chrome:latest",
     "endpoints": [
       {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
   }')
+
 echo $SERVER
+# Returns server_id, cdp_url, status, endpoints
 ```
 
-The response contains `server_id` and `cdp_url` ready to connect to.
+### Step 3 — Run the E2E test
+
+The E2E test boots a browser sandbox, connects via CDP, navigates to Baidu, captures a screenshot, verifies the API, and shuts down cleanly.
+
+```bash
+# Install test dependencies (Option B only; Docker users still need these locally)
+pip install pytest pytest-asyncio
+
+python -m pytest tests/test_e2e_browser.py -v -s
+```
+
+Expected output:
+
+```
+[BOOT]       server_id=...
+[BOOT]       cdp_url=http://127.0.0.1:XXXXX
+[CDP]        browser ready: Chrome/...
+[CDP]        ws_url=ws://127.0.0.1:XXXXX/devtools/browser/...
+[SCREENSHOT] saved tests/screenshot_baidu.png (87.x KB)
+[SHUTDOWN]   {'message': 'success'}
+PASSED
+```
+
+Screenshot is saved to `tests/screenshot_baidu.png`.
 
 ### Step 4 — Shut it down
 
@@ -55,161 +119,50 @@ SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdi
 curl -s -X POST "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
 
-That's the full boot → use → shutdown cycle.
-
-## V0.1 Scope
-
-- Start a Docker sandbox.
-- Expose one or more container endpoints with Docker-allocated host ports.
-- Support endpoint protocol labels including `cdp`, `http`, `sse`, `ws`, and `tcp`.
-- Run basic endpoint readiness checks: `none`, `tcp`, `http`, or `cdp`.
-- Enforce a SQLite-backed active sandbox quota.
-- Track sandbox lifecycle state.
-- Boot sandboxes in batches for rollout.
-- Shutdown individual sandboxes or whole rollouts.
-- Include `trace_id` in logs and JSON responses.
-- Provide an end-to-end CDP test that exposes an endpoint, opens Baidu, and captures a screenshot.
-- Provide a minimal Python SDK for rollout workers.
-
-This release is intentionally single-node first. Kubernetes, Redis queues, Postgres, trajectory collection, replay, reward evaluation, and web workbench features are later-stage concerns.
-
-## Requirements
-
-- Python 3.11+
-- Docker daemon available to the service
-- A Docker image that exposes the ports you declare in `endpoints`
-
-The E2E test expects `browser-use-chrome:latest`, whose CDP proxy listens on container port `9223`.
-
-## Local Python Install
-
-```bash
-pip install -r requirements.txt
-```
-
-## Configure
-
-Copy `.env.example` if you want local overrides:
-
-```bash
-cp .env.example .env
-```
-
-Common settings:
-
-```bash
-export AGENT_ENV_POOL_DOCKER_BROWSER_IMAGE=browser-use-chrome:latest
-export AGENT_ENV_POOL_DOCKER_BROWSER_PORT=9223
-export AGENT_ENV_POOL_MAX_POOL_SIZE=32
-export AGENT_ENV_POOL_PUBLIC_HOST=127.0.0.1
-```
-
-## Local Python Run
-
-```bash
-python -m agent_env_pool --host 0.0.0.0 --port 8100
-```
-
-Health check by listing active sandboxes:
-
-```bash
-curl http://127.0.0.1:8100/api/v1/servers
-```
-
-All JSON responses are wrapped with a request trace:
-
-```json
-{
-  "meta": {"trace_id": "..."},
-  "data": {}
-}
-```
-
 ## API
 
-### Boot One Sandbox
+### Boot a sandbox
 
 ```bash
 curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "runtime": "docker",
+    "image": "browser-use-chrome:latest",
     "endpoints": [
-      {
-        "name": "cdp",
-        "container_port": 9223,
-        "protocol": "cdp",
-        "ready_check": {"type": "cdp"}
-      }
+      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
   }'
 ```
 
-The response includes:
+Response fields: `server_id`, `status`, `cdp_url`, `endpoints[].host_port`, `endpoints[].url`.
 
-- `server_id`
-- `status`
-- `endpoints`, each with `host`, Docker-assigned `host_port`, and direct `url`
-- `cdp_url` for compatibility when an endpoint uses protocol `cdp`
-- Docker `resource_id`
-- Docker-assigned primary host `port`
-
-Example for a non-browser image with HTTP and TCP endpoints:
+Custom image with HTTP + TCP endpoints:
 
 ```json
 {
   "env_type": "custom",
-  "runtime": "docker",
   "image": "my-sandbox:latest",
   "endpoints": [
-    {
-      "name": "api",
-      "container_port": 8080,
-      "protocol": "http",
-      "ready_check": {"type": "http", "path": "/health", "expected_status": 200}
-    },
-    {
-      "name": "worker-stream",
-      "container_port": 9000,
-      "protocol": "tcp",
-      "ready_check": {"type": "tcp"}
-    }
+    {"name": "api", "container_port": 8080, "protocol": "http", "ready_check": {"type": "http", "path": "/health"}},
+    {"name": "stream", "container_port": 9000, "protocol": "tcp", "ready_check": {"type": "tcp"}}
   ]
 }
 ```
 
-### Acquire And Release
-
-Use this flow for rollout workers. `acquire` reuses an idle sandbox if available, otherwise it boots a new one.
+### Acquire & Release (pool reuse)
 
 ```bash
+# Reuses an idle sandbox if available, otherwise boots a new one
 curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
   -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","runtime":"docker","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
-```
+  -d '{"env_type":"browser-use","image":"browser-use-chrome:latest","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
 
-Release it back to the idle pool:
-
-```bash
+# Release back to the idle pool
 curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
 ```
 
-### Shutdown
-
-```bash
-curl -X POST 'http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true'
-```
-
-### List And Inspect
-
-```bash
-curl http://127.0.0.1:8100/api/v1/servers
-curl http://127.0.0.1:8100/api/v1/servers/$SERVER_ID
-curl 'http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/logs?tail=200'
-```
-
-### Batch Rollout Boot
+### Batch rollout
 
 ```bash
 curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
@@ -217,44 +170,27 @@ curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
   -d '{
     "count": 4,
     "env_type": "browser-use",
-    "runtime": "docker",
-    "endpoints": [
-      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
-    ]
+    "image": "browser-use-chrome:latest",
+    "endpoints": [{"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
   }'
+
+curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
+curl -X POST "http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
 
-Inspect and cleanup a rollout:
+### List, inspect & logs
 
 ```bash
-curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
-curl -X POST 'http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true'
+curl http://127.0.0.1:8100/api/v1/servers
+curl http://127.0.0.1:8100/api/v1/servers/$SERVER_ID
+curl "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/logs?tail=200"
 ```
 
-## Inspired Use Cases
+All responses are wrapped with a trace ID:
 
-The scenarios in [OpenSandbox examples](https://github.com/alibaba/OpenSandbox/tree/main/examples) are useful references for what people run inside sandboxes, but those examples are not drop-in compatible with this project. Many of them depend on OpenSandbox-specific SDKs, gateway/domain routing, Kubernetes, PVC, or volume abstractions.
-
-For `agent-env-pool` V0.1, the adaptation path is: package the workload as a Docker image, declare its exposed endpoints, then let this service boot it, publish ports, return direct URLs, track quota, and clean it up.
-
-Good scenario fits:
-
-- **Chrome / browser automation**: expose a CDP endpoint such as `9223`, return `cdp_url`, and let rollout workers connect directly.
-- **Playwright / scraping services**: expose an HTTP or WebSocket control endpoint and use `http`, `ws`, or `tcp` readiness checks.
-- **VS Code / code-server**: expose the web UI port as an `http` endpoint.
-- **Desktop / VNC-style sandboxes**: expose the VNC or noVNC port as `tcp`, `ws`, or `http`, depending on the image.
-- **Agent CLI sandboxes** such as Claude Code, Codex CLI, Gemini CLI, Qwen Code, or Kimi CLI: run them inside a Docker image and expose any API, stream, or control port they provide.
-- **RL training workers**: batch boot containers with `/rollout/boot`, use SQLite quota to cap active sandboxes, and consume endpoint URLs from the response.
-
-What V0.1 does not try to copy yet:
-
-- Kubernetes runtime and PVC abstractions.
-- Built-in volume mount APIs.
-- Hosted gateway/domain routing.
-- Multi-tenant auth and remote cluster scheduling.
-- Trajectory recording, replay, and reward evaluation.
-
-So the current boundary is simple: if an example can run as a Docker container and its useful ports are known, `agent-env-pool` can boot it, publish those ports, return direct URLs, track status, and clean it up.
+```json
+{"meta": {"trace_id": "..."}, "data": {}}
+```
 
 ## Python SDK
 
@@ -264,49 +200,39 @@ from agent_env_pool import EnvPoolClient
 pool = EnvPoolClient("http://127.0.0.1:8100")
 
 with pool.acquire(endpoints=[
-    {
-        "name": "cdp",
-        "container_port": 9223,
-        "protocol": "cdp",
-        "ready_check": {"type": "cdp"},
-    }
+    {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
 ]) as env:
     print(env.server_id)
-    print(env.cdp_url)
-    print(env.endpoints)
-    # Run your agent against env.cdp_url.
+    print(env.cdp_url)   # connect your agent here
 ```
 
-Cold shutdown instead of release:
+## Use Cases
 
-```python
-env = pool.acquire(endpoints=[{"name": "cdp", "container_port": 9223, "protocol": "cdp"}])
-env.shutdown(force=True)
-```
-
-## E2E Test
-
-The E2E test boots a browser sandbox, connects to CDP, opens Baidu, captures a screenshot, verifies list/detail APIs, and shuts the sandbox down.
-
-```bash
-python -m pytest tests/test_e2e_browser.py -v -s
-```
+| Sandbox type | Image | Endpoint |
+|---|---|---|
+| Chrome / browser automation | `browser-use-chrome:latest` | CDP on `9223` |
+| Playwright / scraping | any | HTTP or WebSocket |
+| VS Code / code-server | `codercom/code-server` | HTTP |
+| VNC desktop | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |
+| Agent CLI (Claude Code, Codex, Gemini, Qwen, Kimi) | custom | API / stream port |
+| RL training workers | custom | any |
 
 ## Lifecycle
 
-```text
-starting -> running -> occupied -> stopping -> stopped
-       \        \           \
-                error
+```
+starting → running → occupied → stopping → stopped
+              ↘          ↘          ↘
+                        error
 ```
 
-Active states occupy quota:
-
-```text
-starting, running, occupied, stopping
-```
-
-Quota is enforced with a short SQLite `BEGIN IMMEDIATE` transaction that atomically checks the active count and inserts a `starting` record before Docker boot begins.
+`starting`, `running`, `occupied`, `stopping` all count against the active quota. Quota is enforced with a SQLite `BEGIN IMMEDIATE` transaction before Docker boot begins.
 
 ## Roadmap
 
+| Version | Focus |
+|---|---|
+| V0.1 | Single-node Docker sandbox pool ✅ |
+| V0.2 | Trajectory collection & JSONL export |
+| V0.3 | Failure replay & browser action adapters |
+| V0.4 | Monitoring UI & operator tooling |
+| V0.5 | Kubernetes & distributed scheduling |

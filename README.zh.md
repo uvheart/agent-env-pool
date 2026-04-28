@@ -1,14 +1,31 @@
-# agent-env-pool
+<p align="center">
+  <img src="./pic/logo.png" alt="agent-env-pool" width="120" />
+</p>
 
-[English](./README.md)
+<h1 align="center">agent-env-pool</h1>
 
-`agent-env-pool` 是一个轻量级单节点 Docker 沙箱池，专为 Agent RL rollout 设计。
+<p align="center">
+  轻量级单节点 Docker 沙箱池，专为 Agent RL rollout 设计。
+</p>
 
-V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研究者不再需要手动处理 Docker 端点、端口、配额和清理工作。
+<p align="center">
+  <a href="https://hub.docker.com/r/uvheart280/agent-env-pool"><img src="https://img.shields.io/docker/v/uvheart280/agent-env-pool?label=docker&color=blue" alt="Docker" /></a>
+  <a href="./README.md">English</a>
+</p>
 
-## 快速开始
+<p align="center">
+  <img src="./pic/index.png" alt="agent-env-pool overview" width="800" />
+</p>
 
-### 第一步：启动服务
+---
+
+`agent-env-pool` 只做一件事：可靠地启动、追踪和释放 Docker 沙箱，让研究者不再需要手动处理 Docker 端点、端口、配额和清理。
+
+## 安装
+
+### 方案一：Docker 启动（推荐）
+
+无需 Python 环境，仅需 Docker。
 
 ```bash
 docker run -d \
@@ -20,35 +37,82 @@ docker run -d \
   uvheart280/agent-env-pool:latest
 ```
 
-> 国内如果拉取超时，先配置 Docker 代理或镜像加速器（见下方）。
+> 国内如果拉取超时，请先为 Docker 配置代理或镜像加速器。
 
-### 第二步：准备沙箱镜像
-
-`agent-env-pool` 只负责调度，沙箱镜像由你提供。先把需要的镜像拉到宿主机：
+验证服务已启动：
 
 ```bash
-# 以浏览器沙箱为例（使用 browser-use 项目提供的 Chrome 镜像）
-docker pull browseruse/chrome:latest
+curl http://127.0.0.1:8100/api/v1/servers
+# {"meta":{"trace_id":"..."},"data":{"items":[],"total":0}}
 ```
 
-也可以用任何你自己的镜像，只要它暴露了你需要的端口即可。
+### 方案二：源码安装
 
-### 第三步：验证——启动一个沙箱
+```bash
+git clone https://github.com/uvheart/agent-env-pool.git
+cd agent-env-pool
+
+conda create -n agent-env-pool python=3.11 -y
+conda activate agent-env-pool
+
+pip install -r requirements.txt
+
+python -m agent_env_pool --host 0.0.0.0 --port 8100
+```
+
+## 快速开始
+
+> **前提**：`agent-env-pool` 只是调度层，沙箱镜像需要预先拉取到宿主机。
+
+### 第一步：拉取浏览器沙箱镜像
+
+```bash
+docker pull browser-use-chrome:latest
+```
+
+> 自行构建 `browser-use-chrome`，或任何在 `9223` 端口暴露 CDP 的镜像均可。
+
+### 第二步：启动一个浏览器沙箱
 
 ```bash
 SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "image": "browseruse/chrome:latest",
+    "image": "browser-use-chrome:latest",
     "endpoints": [
       {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
   }')
+
 echo $SERVER
+# 返回 server_id、cdp_url、status、endpoints
 ```
 
-响应中包含 `server_id` 和 `cdp_url`，用于连接浏览器。
+### 第三步：运行 E2E 测试
+
+E2E 测试会自动完成：启动浏览器沙箱 → CDP 连接 → 导航到百度 → 截图保存 → 验证 API → 关闭沙箱。
+
+```bash
+# 安装测试依赖（方案二用户；方案一用户也需在本地执行）
+pip install pytest pytest-asyncio
+
+python -m pytest tests/test_e2e_browser.py -v -s
+```
+
+预期输出：
+
+```
+[BOOT]       server_id=...
+[BOOT]       cdp_url=http://127.0.0.1:XXXXX
+[CDP]        browser ready: Chrome/...
+[CDP]        ws_url=ws://127.0.0.1:XXXXX/devtools/browser/...
+[SCREENSHOT] saved tests/screenshot_baidu.png (87.x KB)
+[SHUTDOWN]   {'message': 'success'}
+PASSED
+```
+
+截图保存在 `tests/screenshot_baidu.png`。
 
 ### 第四步：关闭沙箱
 
@@ -57,161 +121,50 @@ SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdi
 curl -s -X POST "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
 
-至此完成完整的启动→使用→关闭流程。
-
-## V0.1 功能范围
-
-- 启动 Docker 沙箱
-- 暴露一个或多个容器端点，使用 Docker 动态分配的宿主机端口
-- 支持端点协议标签：`cdp`、`http`、`sse`、`ws`、`tcp`
-- 支持端点就绪检查：`none`、`tcp`、`http`、`cdp`
-- 基于 SQLite 的活跃沙箱配额管理
-- 沙箱生命周期状态追踪
-- 支持批量启动沙箱（rollout）
-- 支持单个沙箱或整批 rollout 的关闭
-- 日志和 JSON 响应中均包含 `trace_id`
-- 提供端到端 CDP 测试：启动端点、打开百度、截图
-- 提供最小化 Python SDK 供 rollout worker 使用
-
-本版本有意以单节点优先。Kubernetes、Redis 队列、Postgres、轨迹收集、回放、奖励评估和 Web 工作台等功能属于后续阶段。
-
-## 环境要求
-
-- Python 3.11+
-- Docker daemon 对服务可用
-- 一个暴露了 `endpoints` 中声明端口的 Docker 镜像
-
-E2E 测试依赖 `browser-use-chrome:latest`，其 CDP 代理监听在容器端口 `9223`。
-
-## 本地 Python 安装
-
-```bash
-pip install -r requirements.txt
-```
-
-## 配置
-
-复制 `.env.example` 作为本地配置：
-
-```bash
-cp .env.example .env
-```
-
-常用配置项：
-
-```bash
-export AGENT_ENV_POOL_DOCKER_BROWSER_IMAGE=browser-use-chrome:latest
-export AGENT_ENV_POOL_DOCKER_BROWSER_PORT=9223
-export AGENT_ENV_POOL_MAX_POOL_SIZE=32
-export AGENT_ENV_POOL_PUBLIC_HOST=127.0.0.1
-```
-
-## 本地 Python 运行
-
-```bash
-python -m agent_env_pool --host 0.0.0.0 --port 8100
-```
-
-列出活跃沙箱（健康检查）：
-
-```bash
-curl http://127.0.0.1:8100/api/v1/servers
-```
-
-所有 JSON 响应均包含请求追踪信息：
-
-```json
-{
-  "meta": {"trace_id": "..."},
-  "data": {}
-}
-```
-
 ## API
 
-### 启动单个沙箱
+### 启动沙箱
 
 ```bash
 curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
-    "runtime": "docker",
+    "image": "browser-use-chrome:latest",
     "endpoints": [
-      {
-        "name": "cdp",
-        "container_port": 9223,
-        "protocol": "cdp",
-        "ready_check": {"type": "cdp"}
-      }
+      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ]
   }'
 ```
 
-响应包含：
+响应字段：`server_id`、`status`、`cdp_url`、`endpoints[].host_port`、`endpoints[].url`。
 
-- `server_id`
-- `status`
-- `endpoints`：每个端点含 `host`、Docker 分配的 `host_port` 和直连 `url`
-- `cdp_url`：当端点协议为 `cdp` 时的快捷字段
-- Docker `resource_id`
-- Docker 分配的主端口 `port`
-
-自定义镜像示例（HTTP + TCP 端点）：
+自定义镜像（HTTP + TCP 端点）示例：
 
 ```json
 {
   "env_type": "custom",
-  "runtime": "docker",
   "image": "my-sandbox:latest",
   "endpoints": [
-    {
-      "name": "api",
-      "container_port": 8080,
-      "protocol": "http",
-      "ready_check": {"type": "http", "path": "/health", "expected_status": 200}
-    },
-    {
-      "name": "worker-stream",
-      "container_port": 9000,
-      "protocol": "tcp",
-      "ready_check": {"type": "tcp"}
-    }
+    {"name": "api", "container_port": 8080, "protocol": "http", "ready_check": {"type": "http", "path": "/health"}},
+    {"name": "stream", "container_port": 9000, "protocol": "tcp", "ready_check": {"type": "tcp"}}
   ]
 }
 ```
 
 ### 获取与释放（池化复用）
 
-适用于 rollout worker 场景。`acquire` 优先复用空闲沙箱，无可用时自动启动新沙箱。
-
 ```bash
+# 优先复用空闲沙箱，无可用时自动启动新沙箱
 curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
   -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","runtime":"docker","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
-```
+  -d '{"env_type":"browser-use","image":"browser-use-chrome:latest","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
 
-用完释放回空闲池：
-
-```bash
+# 用完释放回空闲池
 curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
 ```
 
-### 关闭沙箱
-
-```bash
-curl -X POST 'http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true'
-```
-
-### 列表与详情查询
-
-```bash
-curl http://127.0.0.1:8100/api/v1/servers
-curl http://127.0.0.1:8100/api/v1/servers/$SERVER_ID
-curl 'http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/logs?tail=200'
-```
-
-### 批量 Rollout 启动
+### 批量 Rollout
 
 ```bash
 curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
@@ -219,32 +172,27 @@ curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
   -d '{
     "count": 4,
     "env_type": "browser-use",
-    "runtime": "docker",
-    "endpoints": [
-      {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
-    ]
+    "image": "browser-use-chrome:latest",
+    "endpoints": [{"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
   }'
+
+curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
+curl -X POST "http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
 
-查询和清理 rollout：
+### 列表、详情与日志
 
 ```bash
-curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
-curl -X POST 'http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true'
+curl http://127.0.0.1:8100/api/v1/servers
+curl http://127.0.0.1:8100/api/v1/servers/$SERVER_ID
+curl "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/logs?tail=200"
 ```
 
-## 适用场景
+所有响应均包含请求追踪：
 
-以下场景均可将工作负载打包为 Docker 镜像，声明暴露的端点，由本服务负责启动、端口发布、URL 返回、配额管理和清理：
-
-- **Chrome / 浏览器自动化**：暴露 CDP 端点（如 `9223`），返回 `cdp_url`，供 rollout worker 直连
-- **Playwright / 爬虫服务**：暴露 HTTP 或 WebSocket 控制端点，使用 `http`、`ws` 或 `tcp` 就绪检查
-- **VS Code / code-server**：将 Web UI 端口作为 `http` 端点暴露
-- **桌面 / VNC 类沙箱**：将 VNC 或 noVNC 端口作为 `tcp`、`ws` 或 `http` 暴露
-- **Agent CLI 沙箱**（Claude Code、Codex CLI、Gemini CLI、Qwen Code、Kimi CLI 等）：在 Docker 镜像中运行，暴露其 API、流或控制端口
-- **RL 训练 Worker**：批量启动容器（`/rollout/boot`），用 SQLite 配额限制活跃沙箱数，从响应中消费端点 URL
-
-V0.1 暂不涉及：Kubernetes 运行时、内置 Volume 挂载 API、托管网关/域名路由、多租户鉴权、轨迹录制与回放、奖励评估。
+```json
+{"meta": {"trace_id": "..."}, "data": {}}
+```
 
 ## Python SDK
 
@@ -254,53 +202,39 @@ from agent_env_pool import EnvPoolClient
 pool = EnvPoolClient("http://127.0.0.1:8100")
 
 with pool.acquire(endpoints=[
-    {
-        "name": "cdp",
-        "container_port": 9223,
-        "protocol": "cdp",
-        "ready_check": {"type": "cdp"},
-    }
+    {"name": "cdp", "container_port": 9223, "protocol": "cdp", "ready_check": {"type": "cdp"}}
 ]) as env:
     print(env.server_id)
-    print(env.cdp_url)
-    print(env.endpoints)
-    # 使用 env.cdp_url 运行你的 Agent
+    print(env.cdp_url)   # 在此连接你的 Agent
 ```
 
-直接关闭而不释放回池：
+## 适用场景
 
-```python
-env = pool.acquire(endpoints=[{"name": "cdp", "container_port": 9223, "protocol": "cdp"}])
-env.shutdown(force=True)
-```
-
-## E2E 测试
-
-E2E 测试会启动一个浏览器沙箱，通过 CDP 连接，打开百度，截图，验证列表/详情 API，最后关闭沙箱。
-
-```bash
-python -m pytest tests/test_e2e_browser.py -v -s
-```
+| 沙箱类型 | 镜像示例 | 端点 |
+|---|---|---|
+| Chrome / 浏览器自动化 | `browser-use-chrome:latest` | CDP on `9223` |
+| Playwright / 爬虫 | 任意 | HTTP 或 WebSocket |
+| VS Code / code-server | `codercom/code-server` | HTTP |
+| VNC 桌面 | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |
+| Agent CLI（Claude Code、Codex、Gemini CLI、Qwen Code、Kimi CLI） | 自定义 | API / 流端口 |
+| RL 训练 Worker | 自定义 | 任意 |
 
 ## 沙箱生命周期
 
-```text
-starting -> running -> occupied -> stopping -> stopped
-       \        \           \
-                error
+```
+starting → running → occupied → stopping → stopped
+              ↘          ↘          ↘
+                        error
 ```
 
-占用配额的活跃状态：
-
-```text
-starting、running、occupied、stopping
-```
-
-配额通过 SQLite `BEGIN IMMEDIATE` 事务原子执行：在 Docker 启动前，先检查活跃数量并插入 `starting` 记录，保证并发安全。
+`starting`、`running`、`occupied`、`stopping` 均占用配额。配额通过 SQLite `BEGIN IMMEDIATE` 事务在 Docker 启动前原子检查并写入。
 
 ## 路线图
 
-- V0.2：轨迹收集与 JSONL 导出
-- V0.3：失败回放与浏览器动作适配器
-- V0.4：可选监控 UI 与更丰富的运维工具
-- V0.5：Kubernetes 与分布式调度
+| 版本 | 目标 |
+|---|---|
+| V0.1 | 单节点 Docker 沙箱池 ✅ |
+| V0.2 | 轨迹收集与 JSONL 导出 |
+| V0.3 | 失败回放与浏览器动作适配器 |
+| V0.4 | 监控 UI 与运维工具 |
+| V0.5 | Kubernetes 与分布式调度 |
