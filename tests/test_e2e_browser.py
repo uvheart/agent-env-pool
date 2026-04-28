@@ -71,7 +71,15 @@ async def _get_ws_url(cdp_url: str) -> str:
     return ws_url
 
 
-async def _cdp_screenshot(ws_url: str, target_url: str = "https://www.baidu.com") -> bytes:
+async def _cdp_screenshot(
+    ws_url: str,
+    target_url: str = (
+        "data:text/html,%3Chtml%3E%3Cbody%20style%3D%27font-family%3Asans-serif%3B"
+        "padding%3A48px%27%3E%3Ch1%3EAgentEnvPool%20CDP%20OK%3C%2Fh1%3E"
+        "%3Cp%3ELocal%20render%20page%20for%20stable%20E2E%20screenshots.%3C%2Fp%3E"
+        "%3C%2Fbody%3E%3C%2Fhtml%3E"
+    ),
+) -> bytes:
     """Connect to Chrome via browser-level CDP, navigate and capture a screenshot."""
 
     msg_id = 0
@@ -155,7 +163,7 @@ async def _cdp_screenshot(ws_url: str, target_url: str = "https://www.baidu.com"
 
 @pytest.mark.asyncio
 async def test_full_lifecycle(api: httpx.AsyncClient):
-    """Boot -> CDP navigate to Baidu & screenshot -> Shutdown."""
+    """Boot -> CDP render local page & screenshot -> Shutdown."""
 
     server_id = None
     try:
@@ -209,7 +217,7 @@ async def test_full_lifecycle(api: httpx.AsyncClient):
         ws_url = await _get_ws_url(cdp_url)
         print(f"[CDP]  ws_url={ws_url}")
 
-        # ── 4. Navigate to Baidu and take screenshot ─────────────────
+        # ── 4. Render a local page and take a screenshot ─────────────
         screenshot_bytes = await _cdp_screenshot(ws_url)
         SCREENSHOT_PATH.write_bytes(screenshot_bytes)
         size_kb = len(screenshot_bytes) / 1024

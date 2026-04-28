@@ -10,12 +10,13 @@ Port allocation is delegated entirely to Docker (ephemeral host ports).
 from __future__ import annotations
 
 import json
+import ipaddress
 import socket
 import time
 import urllib.request
 
 import docker
-from docker.errors import NotFound
+from docker.errors import ImageNotFound, NotFound
 
 from agent_env_pool.core.config import get_settings
 from agent_env_pool.core.logging import logger_manager
@@ -63,6 +64,7 @@ class DockerProvider:
         if metadata.get("command"):
             run_kwargs["command"] = metadata["command"]
 
+        self._ensure_image_available(image)
         container = self.client.containers.run(image, **run_kwargs)
         container.reload()
 
@@ -118,6 +120,14 @@ class DockerProvider:
         data = container.logs(tail=tail)
         return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
 
+    def _ensure_image_available(self, image: str) -> None:
+        try:
+            self.client.images.get(image)
+        except ImageNotFound as exc:
+            raise RuntimeError(
+                f"image {image!r} is not available locally; pull or build it before booting"
+            ) from exc
+
     def wait_cdp_ready(self, cdp_url: str, timeout_seconds: int, interval_seconds: float) -> dict:
         deadline = time.monotonic() + timeout_seconds
         last_error: Exception | None = None
@@ -138,6 +148,7 @@ class DockerProvider:
             return
 
         check_host = self.settings.docker_ready_host or endpoint["host"]
+        http_check_host = self._resolve_http_check_host(check_host)
         deadline = time.monotonic() + timeout_seconds
         last_error: Exception | None = None
         while time.monotonic() < deadline:
@@ -151,14 +162,14 @@ class DockerProvider:
                 elif check_type == "http":
                     path = ready_check.get("path") or "/"
                     expected_status = int(ready_check.get("expected_status") or 200)
-                    url = self._ready_url(endpoint, check_host, path)
+                    url = self._ready_url(endpoint, http_check_host, path)
                     with urllib.request.urlopen(url, timeout=3) as response:
                         if response.status == expected_status:
                             return
                         last_error = RuntimeError(f"unexpected status {response.status}")
                 elif check_type == "cdp":
                     with urllib.request.urlopen(
-                        self._ready_url(endpoint, check_host, "/json/version"),
+                        self._ready_url(endpoint, http_check_host, "/json/version"),
                         timeout=3,
                     ) as response:
                         if response.status == 200:
@@ -225,6 +236,26 @@ class DockerProvider:
         if scheme == "tcp":
             scheme = "http"
         return f"{scheme}://{check_host}:{endpoint['host_port']}".rstrip("/") + "/" + path.lstrip("/")
+
+    @staticmethod
+    def _resolve_http_check_host(host: str) -> str:
+        """Use an IP literal for HTTP readiness checks when possible.
+
+        Chrome DevTools rejects some non-IP Host headers as a DNS rebinding
+        protection. Docker's host-gateway alias is convenient for TCP connect,
+        but resolving it before issuing the HTTP request keeps CDP readiness
+        checks compatible with Chrome while preserving the public endpoint URL.
+        """
+        try:
+            ipaddress.ip_address(host)
+            return host
+        except ValueError:
+            pass
+
+        try:
+            return socket.gethostbyname(host)
+        except OSError:
+            return host
 
     @staticmethod
     def _url_scheme(protocol: str) -> str:

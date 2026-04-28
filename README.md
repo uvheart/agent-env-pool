@@ -68,7 +68,7 @@ python -m agent_env_pool --host 0.0.0.0 --port 8100
 docker pull zenika/alpine-chrome:124
 ```
 
-> Build `browser-use-chrome` yourself or use any image that exposes a CDP port on `9223`.
+> `zenika/alpine-chrome:124` exposes Chrome DevTools Protocol on `9222` with the command shown below. You can also use any custom image that exposes a CDP port.
 
 ### Step 2 — Boot a browser sandbox
 
@@ -97,7 +97,7 @@ echo $SERVER
 
 ### Step 3 — Run the E2E test
 
-The E2E test boots a browser sandbox, connects via CDP, navigates to Baidu, captures a screenshot, verifies the API, and shuts down cleanly.
+The E2E test boots a browser sandbox, connects via CDP, renders a local test page, captures a screenshot, verifies the API, and shuts down cleanly.
 
 ```bash
 # Install test dependencies (Option B only; Docker users still need these locally)
@@ -164,7 +164,7 @@ Custom image with HTTP + TCP endpoints:
 # Reuses an idle sandbox if available, otherwise boots a new one
 curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
   -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
+  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9222,"protocol":"cdp","ready_check":{"type":"cdp"}}],"metadata":{"command":["--no-sandbox","--remote-debugging-address=0.0.0.0","--remote-debugging-port=9222","about:blank"]}}'
 
 # Release back to the idle pool
 curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
@@ -218,7 +218,7 @@ with pool.acquire(endpoints=[
 
 | Sandbox type | Image | Endpoint |
 |---|---|---|
-| Chrome / browser automation | `zenika/alpine-chrome:124` | CDP on `9223` |
+| Chrome / browser automation | `zenika/alpine-chrome:124` | CDP on `9222` |
 | Playwright / scraping | any | HTTP or WebSocket |
 | VS Code / code-server | `codercom/code-server` | HTTP |
 | VNC desktop | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |

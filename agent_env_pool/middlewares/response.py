@@ -21,6 +21,8 @@ logger = logger_manager.get_logger(__name__)
 
 
 def _wrap(data):
+    if isinstance(data, dict) and "meta" in data and ("data" in data or "error" in data):
+        return data
     return {
         "meta": {"trace_id": get_trace_id()},
         "data": data,

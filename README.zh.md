@@ -70,7 +70,7 @@ python -m agent_env_pool --host 0.0.0.0 --port 8100
 docker pull zenika/alpine-chrome:124
 ```
 
-> 自行构建 `browser-use-chrome`，或任何在 `9223` 端口暴露 CDP 的镜像均可。
+> `zenika/alpine-chrome:124` 可通过下面的命令在 `9222` 端口暴露 Chrome DevTools Protocol。你也可以使用任何自定义 CDP 镜像。
 
 ### 第二步：启动一个浏览器沙箱
 
@@ -99,7 +99,7 @@ echo $SERVER
 
 ### 第三步：运行 E2E 测试
 
-E2E 测试会自动完成：启动浏览器沙箱 → CDP 连接 → 导航到百度 → 截图保存 → 验证 API → 关闭沙箱。
+E2E 测试会自动完成：启动浏览器沙箱 → CDP 连接 → 渲染本地测试页面 → 截图保存 → 验证 API → 关闭沙箱。
 
 ```bash
 # 安装测试依赖（方案二用户；方案一用户也需在本地执行）
@@ -166,7 +166,7 @@ curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
 # 优先复用空闲沙箱，无可用时自动启动新沙箱
 curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
   -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9223,"protocol":"cdp","ready_check":{"type":"cdp"}}]}'
+  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9222,"protocol":"cdp","ready_check":{"type":"cdp"}}],"metadata":{"command":["--no-sandbox","--remote-debugging-address=0.0.0.0","--remote-debugging-port=9222","about:blank"]}}'
 
 # 用完释放回空闲池
 curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
@@ -220,7 +220,7 @@ with pool.acquire(endpoints=[
 
 | 沙箱类型 | 镜像示例 | 端点 |
 |---|---|---|
-| Chrome / 浏览器自动化 | `zenika/alpine-chrome:124` | CDP on `9223` |
+| Chrome / 浏览器自动化 | `zenika/alpine-chrome:124` | CDP on `9222` |
 | Playwright / 爬虫 | 任意 | HTTP 或 WebSocket |
 | VS Code / code-server | `codercom/code-server` | HTTP |
 | VNC 桌面 | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |
