@@ -6,10 +6,28 @@ It focuses on one thing for V0.1: reliably creating, tracking, and releasing Doc
 
 ## Quickstart
 
-**No build needed.** Pull the pre-built image and start the service:
+**No build needed.** Create a `docker-compose.yml` and start:
+
+```yaml
+services:
+  agent-env-pool:
+    image: uvheart/agent-env-pool:latest
+    ports:
+      - "8100:8100"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      AGENT_ENV_POOL_DATABASE_URL: "sqlite+aiosqlite:///./data/agent_env_pool.db"
+      AGENT_ENV_POOL_DOCKER_BROWSER_IMAGE: "browser-use-chrome:latest"
+      AGENT_ENV_POOL_DOCKER_BROWSER_PORT: "9223"
+      AGENT_ENV_POOL_PUBLIC_HOST: "127.0.0.1"
+      AGENT_ENV_POOL_DOCKER_READY_HOST: "host.docker.internal"
+```
 
 ```bash
-curl -O https://raw.githubusercontent.com/uvheart/agent-env-pool/main/docker-compose.yml
 docker compose up -d
 ```
 

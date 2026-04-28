@@ -6,12 +6,34 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 
 ## 快速开始
 
-**无需本地构建**，直接拉取预构建镜像启动服务：
+**无需本地构建**，新建 `docker-compose.yml` 文件，粘贴以下内容：
+
+```yaml
+services:
+  agent-env-pool:
+    image: uvheart/agent-env-pool:latest
+    ports:
+      - "8100:8100"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      AGENT_ENV_POOL_DATABASE_URL: "sqlite+aiosqlite:///./data/agent_env_pool.db"
+      AGENT_ENV_POOL_DOCKER_BROWSER_IMAGE: "browser-use-chrome:latest"
+      AGENT_ENV_POOL_DOCKER_BROWSER_PORT: "9223"
+      AGENT_ENV_POOL_PUBLIC_HOST: "127.0.0.1"
+      AGENT_ENV_POOL_DOCKER_READY_HOST: "host.docker.internal"
+```
+
+然后启动：
 
 ```bash
-curl -O https://raw.githubusercontent.com/uvheart/agent-env-pool/main/docker-compose.yml
 docker compose up -d
 ```
+
+> 镜像托管在 Docker Hub，国内可配合镜像加速器使用，无需翻墙。
 
 ### 启动一个浏览器沙箱
 
