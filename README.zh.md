@@ -6,19 +6,11 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 
 ## 快速开始
 
-### 方式一：直接 pull 镜像启动（推荐）
+**无需本地构建**，直接拉取预构建镜像启动服务：
 
 ```bash
-# 拉取镜像并启动服务
+curl -O https://raw.githubusercontent.com/uvheart/agent-env-pool/main/docker-compose.yml
 docker compose up -d
-```
-
-> `docker-compose.yml` 已配置镜像地址为 `ghcr.io/uvheart/agent-env-pool:latest`，无需本地构建。
-
-### 方式二：本地构建启动
-
-```bash
-docker compose up -d --build
 ```
 
 ### 启动一个浏览器沙箱

@@ -6,10 +6,11 @@ It focuses on one thing for V0.1: reliably creating, tracking, and releasing Doc
 
 ## Quickstart
 
-Start the API service with Docker:
+**No build needed.** Pull the pre-built image and start the service:
 
 ```bash
-docker compose up -d --build
+curl -O https://raw.githubusercontent.com/uvheart/agent-env-pool/main/docker-compose.yml
+docker compose up -d
 ```
 
 Boot one browser sandbox:
@@ -279,7 +280,3 @@ Quota is enforced with a short SQLite `BEGIN IMMEDIATE` transaction that atomica
 
 ## Roadmap
 
-- V0.2: trajectory collection and JSONL export
-- V0.3: failure replay and browser action adapters
-- V0.4: optional monitoring UI and richer operator tooling
-- V0.5: Kubernetes and distributed scheduling
