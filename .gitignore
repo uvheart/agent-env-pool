@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+agent_env_pool.db
+logs/
+artifacts/
+
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+
+.env
