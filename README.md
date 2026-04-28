@@ -11,7 +11,7 @@ It focuses on one thing for V0.1: reliably creating, tracking, and releasing Doc
 ```yaml
 services:
   agent-env-pool:
-    image: uvheart/agent-env-pool:latest
+    image: uvheart280/agent-env-pool:latest
     ports:
       - "8100:8100"
     volumes:

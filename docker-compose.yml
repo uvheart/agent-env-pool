@@ -1,6 +1,6 @@
 services:
   agent-env-pool:
-    image: uvheart/agent-env-pool:latest
+    image: uvheart280/agent-env-pool:latest
     build:
       context: .
       dockerfile: Dockerfile

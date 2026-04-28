@@ -11,7 +11,7 @@ V0.1 只做一件事：可靠地创建、追踪和释放 Docker 沙箱，让研�
 ```yaml
 services:
   agent-env-pool:
-    image: uvheart/agent-env-pool:latest
+    image: uvheart280/agent-env-pool:latest
     ports:
       - "8100:8100"
     volumes:
