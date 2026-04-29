@@ -40,7 +40,7 @@ class DockerProvider:
         endpoints: list[dict] | None = None,
     ) -> RuntimeInstance:
         endpoint_specs = self._normalize_endpoints(metadata, endpoints)
-        name = f"{self.settings.container_name_prefix}-{server_id[:12]}"
+        name = f"{self.settings.container_name_prefix}-{server_id}"
         labels = {
             "agent-env-pool": "true",
             "agent-env-pool.server_id": server_id,
