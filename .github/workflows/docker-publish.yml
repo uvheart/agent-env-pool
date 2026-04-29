@@ -17,11 +17,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(cat VERSION 2>/dev/null || echo "0.0.0")"
+          NOTES="$(python3 - <<'PY'
+from pathlib import Path
+
+path = Path("CHANGELOG.md")
+if not path.exists():
+    print("")
+    raise SystemExit
+
+lines = path.read_text().splitlines()
+body = []
+capture = False
+for line in lines:
+    if line.startswith("## "):
+        if capture:
+            break
+        capture = True
+        continue
+    if capture:
+        body.append(line)
+text = " ".join(line.strip().lstrip("- ").strip() for line in body if line.strip())
+print(text[:500])
+PY
+)"
+          {
+            echo "version=$VERSION"
+            echo "notes=$NOTES"
+            python3 - <<PY
+import json
+version = "$VERSION"
+notes = """$NOTES"""
+print("extra_json=" + json.dumps({"版本": "v" + version, "版本说明": notes}, ensure_ascii=False))
+PY
+          } >> "$GITHUB_OUTPUT"
+
       - name: Notify Feishu - Start
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: scripts/ci/notify-feishu.sh start "Docker Release 发布"
+          EXTRA_JSON: ${{ steps.release.outputs.extra_json }}
+        run: scripts/ci/notify-feishu.sh start "Docker Release 发布" "$EXTRA_JSON"
 
       - name: Install dependencies
         run: python3 -m pip install --user -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
@@ -38,6 +79,8 @@ jobs:
             echo "sha_tag=$IMAGE:sha-$SHORT_SHA"
             if [[ "$GITHUB_REF_TYPE" == "branch" && "$GITHUB_REF_NAME" == "main" ]]; then
               echo "latest_tag=$IMAGE:latest"
+              echo "version_tag=$IMAGE:${{ steps.release.outputs.version }}"
+              echo "raw_tag=$IMAGE:v${{ steps.release.outputs.version }}"
             fi
             if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
               echo "version_tag=$IMAGE:${GITHUB_REF_NAME#v}"
@@ -46,7 +89,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Docker build
-        run: docker build -t "${{ steps.image.outputs.sha_tag }}" .
+        run: |
+          docker build \
+            --label "org.opencontainers.image.version=${{ steps.release.outputs.version }}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.description=${{ steps.release.outputs.notes }}" \
+            -t "${{ steps.image.outputs.sha_tag }}" .
 
       - name: Docker run smoke test
         run: scripts/ci/docker-smoke.sh "${{ steps.image.outputs.sha_tag }}"
@@ -93,11 +141,13 @@ jobs:
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: scripts/ci/notify-feishu.sh success "Docker Release 发布"
+          EXTRA_JSON: ${{ steps.release.outputs.extra_json }}
+        run: scripts/ci/notify-feishu.sh success "Docker Release 发布" "$EXTRA_JSON"
 
       - name: Notify Feishu - Failure
         if: failure()
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: scripts/ci/notify-feishu.sh failure "Docker Release 发布"
+          EXTRA_JSON: ${{ steps.release.outputs.extra_json }}
+        run: scripts/ci/notify-feishu.sh failure "Docker Release 发布" "$EXTRA_JSON"

@@ -40,6 +40,10 @@ REPO="${REPO:-uvheart/agent-env-pool}"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 HEAD_SHA="$(git rev-parse HEAD)"
 PR_NUMBER=""
+VERSION_FILE="VERSION"
+CHANGELOG_FILE="CHANGELOG.md"
+RELEASE_VERSION=""
+RELEASE_NOTES=""
 
 POLL_INTERVAL=15
 PIPELINE_TIMEOUT=600
@@ -60,9 +64,54 @@ notify() {
   RUN_ID="${CURRENT_RUN_ID:-local}" \
   RUN_URL="${CURRENT_RUN_URL:-}" \
   EVENT="local-pipeline" \
+  TRIGGER_SOURCE="开发机器（wl） / local shell / host: $(hostname 2>/dev/null || echo unknown)" \
+  HOST_NAME="$(hostname 2>/dev/null || echo unknown)" \
   ACTOR="$(git config user.name 2>/dev/null || echo local)" \
   JOB="" COMMIT_MSG="$(git log -1 --format=%s 2>/dev/null || true)" \
   bash scripts/ci/notify-feishu.sh "$status" "$stage" 2>/dev/null || true
+}
+
+next_patch_version() {
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path("VERSION")
+raw = path.read_text().strip() if path.exists() else "0.0.0"
+try:
+    major, minor, patch = [int(part) for part in raw.split(".")]
+except Exception:
+    major, minor, patch = 0, 0, 0
+
+if raw == "0.0.0" and not path.exists():
+    print("0.1.0")
+else:
+    print(f"{major}.{minor}.{patch + 1}")
+PY
+}
+
+write_version_notes() {
+  local version="$1" notes="$2"
+  local date_utc
+  date_utc="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+  echo "$version" > "$VERSION_FILE"
+
+  local old_changelog=""
+  if [[ -f "$CHANGELOG_FILE" ]]; then
+    old_changelog="$(cat "$CHANGELOG_FILE")"
+  fi
+
+  {
+    echo "# Changelog"
+    echo ""
+    echo "## v$version - $date_utc"
+    echo ""
+    echo "$notes" | sed 's/^/- /'
+    echo ""
+    if [[ -n "$old_changelog" ]]; then
+      echo "$old_changelog" | sed '1{/^# Changelog$/d;}' | sed '1{/^$/d;}'
+    fi
+  } > "$CHANGELOG_FILE"
 }
 
 run_step() {
@@ -244,16 +293,25 @@ hr
 # ── Step 2.5: 自动提交未暂存的改动 ────────────────────────────────────
 if [[ -n "$(git status --porcelain)" ]]; then
   log "检测到未提交的改动，自动提交..."
-  COMMIT_MSG="${PIPELINE_COMMIT_MSG:-ci: auto-commit from pipeline $(date '+%m%d-%H%M')}"
+  RELEASE_VERSION="$(next_patch_version)"
+  RELEASE_NOTES="${PIPELINE_RELEASE_NOTES:-${PIPELINE_COMMIT_MSG:-自动流水线提交 $(date '+%Y-%m-%d %H:%M')}}"
+  COMMIT_MSG="${PIPELINE_COMMIT_MSG:-chore(release): v$RELEASE_VERSION}"
+  write_version_notes "$RELEASE_VERSION" "$RELEASE_NOTES"
+  log "生成版本说明"
+  echo "   version: v$RELEASE_VERSION"
+  echo "   notes:   $RELEASE_NOTES"
   git add -A
-  git commit -m "$COMMIT_MSG" --no-verify
+  git commit -m "v$RELEASE_VERSION: $COMMIT_MSG" --no-verify
   HEAD_SHA="$(git rev-parse HEAD)"
-  ok "已提交: $COMMIT_MSG"
+  ok "已提交: v$RELEASE_VERSION: $COMMIT_MSG"
   echo "   commit: ${HEAD_SHA:0:7}"
 else
   log "工作区干净，无需提交"
   HEAD_SHA="$(git rev-parse HEAD)"
+  RELEASE_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo unknown)"
+  RELEASE_NOTES="$(git log -1 --format=%s 2>/dev/null || true)"
   echo "   commit: ${HEAD_SHA:0:7}"
+  echo "   version: v$RELEASE_VERSION"
 fi
 hr
 
@@ -293,10 +351,47 @@ EXISTING_PR=$(gh_api "https://api.github.com/repos/$REPO/pulls?head=${REPO%%/*}:
 if [[ -n "$EXISTING_PR" ]]; then
   log "PR #$EXISTING_PR 已存在，复用"
   PR_NUMBER="$EXISTING_PR"
+  PR_PAYLOAD="$(mktemp)"
+  RELEASE_VERSION="$RELEASE_VERSION" COMMIT_MSG="$COMMIT_MSG" RELEASE_NOTES="$RELEASE_NOTES" \
+    python3 - <<'PY' > "$PR_PAYLOAD"
+import json
+import os
+
+version = os.environ["RELEASE_VERSION"]
+commit_msg = os.environ["COMMIT_MSG"]
+release_notes = os.environ["RELEASE_NOTES"]
+
+print(json.dumps({
+    "title": f"v{version}: {commit_msg}",
+    "body": f"版本: v{version}\n\n版本说明:\n{release_notes}\n\n自动化全流程测试更新。",
+}, ensure_ascii=False))
+PY
+  gh_api -X PATCH "https://api.github.com/repos/$REPO/pulls/$PR_NUMBER" -d @"$PR_PAYLOAD" >/dev/null
+  rm -f "$PR_PAYLOAD"
+  ok "已更新 PR #$PR_NUMBER 的版本说明"
 else
   PR_BODY="自动化全流程测试 - $(date '+%Y-%m-%d %H:%M')"
-  PR_RESULT=$(gh_api -X POST "https://api.github.com/repos/$REPO/pulls" \
-    -d "{\"title\":\"ci: pipeline test $(date '+%m%d-%H%M')\",\"head\":\"$BRANCH\",\"base\":\"main\",\"body\":\"$PR_BODY\"}")
+  PR_PAYLOAD="$(mktemp)"
+  RELEASE_VERSION="$RELEASE_VERSION" COMMIT_MSG="$COMMIT_MSG" BRANCH="$BRANCH" RELEASE_NOTES="$RELEASE_NOTES" PR_BODY="$PR_BODY" \
+    python3 - <<'PY' > "$PR_PAYLOAD"
+import json
+import os
+
+version = os.environ["RELEASE_VERSION"]
+commit_msg = os.environ["COMMIT_MSG"]
+branch = os.environ["BRANCH"]
+release_notes = os.environ["RELEASE_NOTES"]
+pr_body = os.environ["PR_BODY"]
+
+print(json.dumps({
+    "title": f"v{version}: {commit_msg}",
+    "head": branch,
+    "base": "main",
+    "body": f"版本: v{version}\n\n版本说明:\n{release_notes}\n\n{pr_body}",
+}, ensure_ascii=False))
+PY
+  PR_RESULT=$(gh_api -X POST "https://api.github.com/repos/$REPO/pulls" -d @"$PR_PAYLOAD")
+  rm -f "$PR_PAYLOAD"
   PR_NUMBER=$(echo "$PR_RESULT" | python3 -c "import sys,json;print(json.load(sys.stdin).get('number',''))" 2>/dev/null)
   ok "创建 PR #$PR_NUMBER"
 fi
