@@ -124,7 +124,11 @@ ROLLOUT=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
     "count": 10,
     "env_type": "browser-use",
     "image": "zenika/alpine-chrome:124",
-    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
+    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}],
+    "metadata": {
+      "command": ["--no-sandbox", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222", "about:blank"],
+      "security_opt": ["seccomp=unconfined"]
+    }
   }')
 
 ROLLOUT_ID=$(echo $ROLLOUT | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['rollout_id'])")
