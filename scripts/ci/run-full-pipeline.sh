@@ -320,6 +320,7 @@ else
   HEAD_SHA="$(git rev-parse HEAD)"
   RELEASE_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo unknown)"
   RELEASE_NOTES="$(git log -1 --format=%s 2>/dev/null || true)"
+  COMMIT_MSG="${PIPELINE_COMMIT_MSG:-$RELEASE_NOTES}"
   echo "   commit: ${HEAD_SHA:0:7}"
   echo "   version: v$RELEASE_VERSION"
 fi
