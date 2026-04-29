@@ -21,6 +21,7 @@ RUN_ID="${GITHUB_RUN_ID:-${RUN_ID:-}}"
 RUN_URL="${RUN_URL:-${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${RUN_ID}}"
 ACTOR="${GITHUB_ACTOR:-${ACTOR:-$(git config user.name 2>/dev/null || echo unknown)}}"
 JOB="${GITHUB_JOB:-${JOB:-}}"
+EVENT="${GITHUB_EVENT_NAME:-${EVENT:-local-pipeline}}"
 START_TIME="${START_TIME:-$(date -u '+%Y-%m-%d %H:%M:%S UTC')}"
 
 # Fetch commit message
@@ -30,6 +31,8 @@ if [[ -n "${SHA}" ]] && [[ -n "${GITHUB_TOKEN:-}" ]]; then
     "${GITHUB_API_URL:-https://api.github.com}/repos/${REPO}/commits/${SHA}" \
     | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("commit",{}).get("message","").split(chr(10))[0][:80])' 2>/dev/null || true)
 fi
+
+export STATUS WORKFLOW EXTRA REPO REF SHA SHORT_SHA RUN_ID RUN_URL ACTOR JOB EVENT START_TIME COMMIT_MSG
 
 # Build and send interactive card
 python3 -c '
@@ -44,6 +47,7 @@ short_sha = sha[:7] if sha else ""
 run_id = os.environ.get("RUN_ID", "")
 run_url = os.environ.get("RUN_URL", "")
 actor = os.environ.get("ACTOR", "")
+event = os.environ.get("EVENT", "")
 start_time = os.environ.get("START_TIME", "")
 commit_msg = os.environ.get("COMMIT_MSG", "")
 job = os.environ.get("JOB", "")
@@ -62,9 +66,10 @@ elements = []
 col_left = []
 if actor:
     col_left.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f464 **\u89e6\u53d1\u8005**\n{actor}"}})
-col_left.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f4c5 **\u65f6\u95f4**\n{start_time}"}})
+col_left.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f4c5 **\u5f00\u59cb\u65f6\u95f4**\n{start_time}"}})
 
 col_right = []
+col_right.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f514 **\u89e6\u53d1\u4e8b\u4ef6**\n`{event}`"}})
 col_right.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f33f **\u5206\u652f**\n`{ref}`"}})
 if job:
     col_right.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\u2699\ufe0f **Job**\n`{job}`"}})

@@ -38,6 +38,8 @@ export FEISHU_WEBHOOK_URL="${FEISHU_WEBHOOK_URL:-}"
 export GH_TOKEN="${GH_TOKEN:-}"
 REPO="${REPO:-uvheart/agent-env-pool}"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+HEAD_SHA="$(git rev-parse HEAD)"
+PR_NUMBER=""
 
 POLL_INTERVAL=15
 PIPELINE_TIMEOUT=600
@@ -57,6 +59,7 @@ notify() {
   SHA="$(git rev-parse HEAD 2>/dev/null || true)" \
   RUN_ID="${CURRENT_RUN_ID:-local}" \
   RUN_URL="${CURRENT_RUN_URL:-}" \
+  EVENT="local-pipeline" \
   ACTOR="$(git config user.name 2>/dev/null || echo local)" \
   JOB="" COMMIT_MSG="$(git log -1 --format=%s 2>/dev/null || true)" \
   bash scripts/ci/notify-feishu.sh "$status" "$stage" 2>/dev/null || true
@@ -83,11 +86,45 @@ gh_api() {
     -H "Accept: application/vnd.github+json" "$@"
 }
 
+print_run_jobs() {
+  local run_id="$1"
+  gh_api "https://api.github.com/repos/$REPO/actions/runs/$run_id/jobs" \
+    | python3 -c '
+import json, sys
+jobs = json.load(sys.stdin).get("jobs", [])
+for job in jobs:
+    print(f"   Job: {job[\"name\"]} | {job[\"status\"]} | {job.get(\"conclusion\") or \"-\"}")
+    for step in job.get("steps", []):
+        mark = "✓" if step.get("conclusion") == "success" else ("✗" if step.get("conclusion") == "failure" else "○")
+        print(f"      {mark} {step[\"name\"]} ({step.get(\"conclusion\") or step.get(\"status\")})")
+'
+}
+
+print_run_failure_logs() {
+  local run_id="$1"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  log "下载失败日志: https://github.com/$REPO/actions/runs/$run_id"
+  if gh_api -L "https://api.github.com/repos/$REPO/actions/runs/$run_id/logs" -o "$tmp_dir/logs.zip" >/dev/null 2>&1; then
+    unzip -q "$tmp_dir/logs.zip" -d "$tmp_dir/logs" >/dev/null 2>&1 || true
+    echo "   ── 失败日志摘要 ──"
+    grep -RniE "error|failed|failure|traceback|exception|assertion|importerror" "$tmp_dir/logs" 2>/dev/null \
+      | head -80 \
+      | sed 's/^/   /' || true
+    echo "   ── 摘要结束 ──"
+  else
+    fail "日志下载失败，请手动打开 run URL 查看"
+  fi
+  rm -rf "$tmp_dir"
+}
+
 wait_workflow() {
-  local workflow_name="$1" expected_branch="$2" after_time="$3"
+  local workflow_name="$1" expected_branch="$2" expected_sha="$3"
   local deadline=$((SECONDS + PIPELINE_TIMEOUT))
 
-  log "等待 $workflow_name 在 $expected_branch 触发..."
+  log "等待 $workflow_name 触发..."
+  echo "   branch: $expected_branch"
+  echo "   commit: ${expected_sha:0:7}"
 
   local run_id=""
   while [[ -z "$run_id" ]]; do
@@ -95,12 +132,12 @@ wait_workflow() {
       fail "$workflow_name: 等待触发超时"
       return 1
     fi
-    run_id=$(gh_api "https://api.github.com/repos/$REPO/actions/runs?branch=$expected_branch&per_page=5&created=%3E$after_time" \
+    run_id=$(gh_api "https://api.github.com/repos/$REPO/actions/runs?branch=$expected_branch&per_page=20" \
       | python3 -c "
 import sys, json
 runs = json.load(sys.stdin).get('workflow_runs', [])
 for r in runs:
-    if r['name'] == '$workflow_name' and r['status'] != 'completed':
+    if r['name'] == '$workflow_name' and r.get('head_sha') == '$expected_sha':
         print(r['id']); break
 " 2>/dev/null || true)
     [[ -z "$run_id" ]] && sleep "$POLL_INTERVAL"
@@ -108,60 +145,73 @@ for r in runs:
 
   CURRENT_RUN_ID="$run_id"
   CURRENT_RUN_URL="https://github.com/$REPO/actions/runs/$run_id"
-  log "$workflow_name 已触发: Run #$run_id"
+  log "$workflow_name 已触发"
+  echo "   run_id: $run_id"
+  echo "   url:    $CURRENT_RUN_URL"
 
   while true; do
     if (( SECONDS >= deadline )); then
       fail "$workflow_name Run #$run_id: 执行超时"
+      print_run_jobs "$run_id"
       return 1
     fi
     local result
     result=$(gh_api "https://api.github.com/repos/$REPO/actions/runs/$run_id" \
       | python3 -c "
 import sys, json; r = json.load(sys.stdin)
-print(f\"{r['status']}|{r['conclusion'] or ''}\")" 2>/dev/null)
+print(f\"{r['status']}|{r['conclusion'] or ''}|{r.get('run_started_at') or ''}\")" 2>/dev/null)
 
-    local status="${result%%|*}" conclusion="${result##*|}"
+    local status conclusion started_at
+    IFS="|" read -r status conclusion started_at <<< "$result"
     if [[ "$status" == "completed" ]]; then
       if [[ "$conclusion" == "success" ]]; then
         ok "$workflow_name Run #$run_id: $conclusion"
+        print_run_jobs "$run_id"
         return 0
       else
         fail "$workflow_name Run #$run_id: $conclusion"
+        print_run_jobs "$run_id"
+        print_run_failure_logs "$run_id"
         return 1
       fi
     fi
-    echo "   ⏳ $workflow_name: $status ... (${SECONDS}s)"
+    echo "   ⏳ $workflow_name: $status | started_at=${started_at:-unknown} | elapsed=${SECONDS}s"
     sleep "$POLL_INTERVAL"
   done
 }
 
 wait_merge() {
   local deadline=$((SECONDS + PIPELINE_TIMEOUT))
-  log "等待 PR 自动合并到 main..."
+  log "等待 PR #$PR_NUMBER 自动合并到 main..."
 
   while true; do
     if (( SECONDS >= deadline )); then
       fail "等待合并超时"
       return 1
     fi
-    local main_sha
-    main_sha=$(gh_api "https://api.github.com/repos/$REPO/branches/main" \
-      | python3 -c "import sys,json;print(json.load(sys.stdin)['commit']['sha'][:7])" 2>/dev/null)
-    local pr_state
-    pr_state=$(gh_api "https://api.github.com/repos/$REPO/pulls?state=closed&head=${REPO%%/*}:$BRANCH&base=main&per_page=1" \
+    local pr_info
+    pr_info=$(gh_api "https://api.github.com/repos/$REPO/pulls/$PR_NUMBER" \
       | python3 -c "
 import sys, json
-prs = json.load(sys.stdin)
-if prs and prs[0].get('merged_at'): print('merged')
-else: print('open')
+pr = json.load(sys.stdin)
+print('|'.join([
+    str(pr.get('state') or ''),
+    str(pr.get('mergeable_state') or ''),
+    str(pr.get('merged_at') or ''),
+    str(pr.get('merge_commit_sha') or ''),
+]))
 " 2>/dev/null)
 
-    if [[ "$pr_state" == "merged" ]]; then
-      ok "PR 已合并到 main (HEAD: $main_sha)"
+    local state mergeable_state merged_at merge_commit_sha
+    IFS="|" read -r state mergeable_state merged_at merge_commit_sha <<< "$pr_info"
+    if [[ -n "$merged_at" && "$merged_at" != "None" ]]; then
+      ok "PR #$PR_NUMBER 已合并到 main"
+      echo "   merged_at: $merged_at"
+      echo "   merge_commit: ${merge_commit_sha:0:7}"
+      HEAD_SHA="$merge_commit_sha"
       return 0
     fi
-    echo "   ⏳ PR 状态: $pr_state ... (${SECONDS}s)"
+    echo "   ⏳ PR #$PR_NUMBER: state=$state mergeable_state=$mergeable_state elapsed=${SECONDS}s"
     sleep "$POLL_INTERVAL"
   done
 }
@@ -192,20 +242,23 @@ if [[ -n "$(git status --porcelain)" ]]; then
   COMMIT_MSG="${PIPELINE_COMMIT_MSG:-ci: auto-commit from pipeline $(date '+%m%d-%H%M')}"
   git add -A
   git commit -m "$COMMIT_MSG" --no-verify
+  HEAD_SHA="$(git rev-parse HEAD)"
   ok "已提交: $COMMIT_MSG"
+  echo "   commit: ${HEAD_SHA:0:7}"
 else
   log "工作区干净，无需提交"
+  HEAD_SHA="$(git rev-parse HEAD)"
+  echo "   commit: ${HEAD_SHA:0:7}"
 fi
 hr
 
 # ── Step 3: Push 到 feature 分支 ──────────────────────────────────────
-TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 run_step "Step 3: Push 到 $BRANCH" git push origin "$BRANCH"
 hr
 
 # ── Step 4: 等待 GitHub CI ────────────────────────────────────────────
 notify start "Step 4: GitHub CI"
-if wait_workflow "CI" "$BRANCH" "$TIMESTAMP"; then
+if wait_workflow "CI" "$BRANCH" "$HEAD_SHA"; then
   notify success "Step 4: GitHub CI"
 else
   notify failure "Step 4: GitHub CI"
@@ -228,11 +281,12 @@ else
   PR_NUMBER=$(echo "$PR_RESULT" | python3 -c "import sys,json;print(json.load(sys.stdin).get('number',''))" 2>/dev/null)
   ok "创建 PR #$PR_NUMBER"
 fi
+echo "   url: https://github.com/$REPO/pull/$PR_NUMBER"
 hr
 
 # ── Step 5: 等待 E2E ──────────────────────────────────────────────────
 notify start "Step 5: E2E 测试"
-if wait_workflow "E2E" "$BRANCH" "$TIMESTAMP"; then
+if wait_workflow "E2E" "$BRANCH" "$HEAD_SHA"; then
   notify success "Step 5: E2E 测试"
 else
   notify failure "Step 5: E2E 测试"
@@ -253,9 +307,8 @@ git fetch origin main 2>/dev/null
 hr
 
 # ── Step 7: 等待 Docker Release ───────────────────────────────────────
-MERGE_TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 notify start "Step 7: Docker Release"
-if wait_workflow "Release" "main" "$MERGE_TIMESTAMP"; then
+if wait_workflow "Release" "main" "$HEAD_SHA"; then
   notify success "Step 7: Docker Release"
 else
   notify failure "Step 7: Docker Release"
