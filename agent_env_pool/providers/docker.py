@@ -63,6 +63,12 @@ class DockerProvider:
         )
         if metadata.get("command"):
             run_kwargs["command"] = metadata["command"]
+        if metadata.get("cap_add"):
+            run_kwargs["cap_add"] = metadata["cap_add"]
+        if metadata.get("security_opt"):
+            run_kwargs["security_opt"] = metadata["security_opt"]
+        if metadata.get("privileged"):
+            run_kwargs["privileged"] = metadata["privileged"]
 
         self._ensure_image_available(image)
         container = self.client.containers.run(image, **run_kwargs)

@@ -89,7 +89,8 @@ SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
         "--remote-debugging-address=0.0.0.0",
         "--remote-debugging-port=9222",
         "about:blank"
-      ]
+      ],
+      "cap_add": ["SYS_ADMIN"]
     }
   }')
 
