@@ -93,10 +93,15 @@ print_run_jobs() {
 import json, sys
 jobs = json.load(sys.stdin).get("jobs", [])
 for job in jobs:
-    print(f"   Job: {job[\"name\"]} | {job[\"status\"]} | {job.get(\"conclusion\") or \"-\"}")
+    name = job["name"]
+    status = job["status"]
+    conclusion = job.get("conclusion") or "-"
+    print(f"   Job: {name} | {status} | {conclusion}")
     for step in job.get("steps", []):
         mark = "✓" if step.get("conclusion") == "success" else ("✗" if step.get("conclusion") == "failure" else "○")
-        print(f"      {mark} {step[\"name\"]} ({step.get(\"conclusion\") or step.get(\"status\")})")
+        step_name = step["name"]
+        step_state = step.get("conclusion") or step.get("status")
+        print(f"      {mark} {step_name} ({step_state})")
 '
 }
 
@@ -250,6 +255,20 @@ else
   HEAD_SHA="$(git rev-parse HEAD)"
   echo "   commit: ${HEAD_SHA:0:7}"
 fi
+hr
+
+# ── Step 2.6: 同步 main，避免 PR dirty 导致 E2E / auto-merge 不触发 ─────
+run_step "Step 2.6: 同步 origin/main" git fetch origin main
+if ! git merge --no-edit origin/main; then
+  fail "同步 origin/main 失败：存在合并冲突，请先人工解决冲突后重跑脚本"
+  git status --short
+  notify failure "Step 2.6: 同步 origin/main"
+  notify failure "全流程流水线"
+  exit 1
+fi
+HEAD_SHA="$(git rev-parse HEAD)"
+ok "已同步 origin/main"
+echo "   commit: ${HEAD_SHA:0:7}"
 hr
 
 # ── Step 3: Push 到 feature 分支 ──────────────────────────────────────
