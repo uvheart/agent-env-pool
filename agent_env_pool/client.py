@@ -121,10 +121,12 @@ class EnvPoolClient:
         image: str | None = None,
         endpoints: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
+        verbose: bool = False,
     ) -> dict[str, Any]:
         return self._unwrap(
             self.http.post(
                 f"{self.base_url}/api/v1/rollout/boot",
+                params={"verbose": str(verbose).lower()},
                 json={
                     "count": count,
                     "env_type": env_type,

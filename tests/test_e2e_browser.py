@@ -8,8 +8,9 @@ Requires:
 import asyncio
 import base64
 import json
+import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 import pytest
@@ -21,7 +22,14 @@ from agent_env_pool.core.database import init_db
 
 BROWSER_IMAGE = "zenika/alpine-chrome:124"
 CDP_CONTAINER_PORT = 9222
-SCREENSHOT_PATH = Path(__file__).parent / "screenshot_baidu.png"
+STABLE_E2E_TARGET_URL = (
+    "data:text/html,%3Chtml%3E%3Cbody%20style%3D%27font-family%3Asans-serif%3B"
+    "padding%3A48px%27%3E%3Ch1%3EAgentEnvPool%20CDP%20OK%3C%2Fh1%3E"
+    "%3Cp%3ELocal%20render%20page%20for%20stable%20parallel%20E2E%20screenshots.%3C%2Fp%3E"
+    "%3C%2Fbody%3E%3C%2Fhtml%3E"
+)
+E2E_TARGET_URL = os.getenv("AGENT_ENV_POOL_E2E_TARGET_URL", STABLE_E2E_TARGET_URL)
+SCREENSHOT_PATH = Path(__file__).parent / "screenshot_e2e.png"
 
 CONTAINER_READY_TIMEOUT = 60
 PAGE_LOAD_TIMEOUT = 30
@@ -73,17 +81,16 @@ async def _get_ws_url(cdp_url: str) -> str:
 
 async def _cdp_screenshot(
     ws_url: str,
-    target_url: str = (
-        "data:text/html,%3Chtml%3E%3Cbody%20style%3D%27font-family%3Asans-serif%3B"
-        "padding%3A48px%27%3E%3Ch1%3EAgentEnvPool%20CDP%20OK%3C%2Fh1%3E"
-        "%3Cp%3ELocal%20render%20page%20for%20stable%20E2E%20screenshots.%3C%2Fp%3E"
-        "%3C%2Fbody%3E%3C%2Fhtml%3E"
-    ),
+    target_url: str = E2E_TARGET_URL,
 ) -> bytes:
-    """Connect to Chrome via browser-level CDP, navigate and capture a screenshot."""
+    """Open a page-level CDP target, navigate, and capture a screenshot."""
 
     msg_id = 0
     pending: dict[int, asyncio.Future] = {}
+    page_target_id: str | None = None
+
+    parsed_ws = urlparse(ws_url)
+    cdp_url = f"http://{parsed_ws.hostname}:{parsed_ws.port}"
 
     async def _reader(ws):
         """Background task that dispatches incoming messages."""
@@ -99,13 +106,17 @@ async def _cdp_screenshot(
     async def send_cmd(ws, method: str, params: dict | None = None, session_id: str | None = None) -> dict:
         nonlocal msg_id
         msg_id += 1
+        current_id = msg_id
         fut = asyncio.get_event_loop().create_future()
-        pending[msg_id] = fut
-        payload = {"id": msg_id, "method": method, "params": params or {}}
+        pending[current_id] = fut
+        payload = {"id": current_id, "method": method, "params": params or {}}
         if session_id:
             payload["sessionId"] = session_id
         await ws.send(json.dumps(payload))
-        return await asyncio.wait_for(fut, timeout=PAGE_LOAD_TIMEOUT)
+        try:
+            return await asyncio.wait_for(fut, timeout=PAGE_LOAD_TIMEOUT)
+        finally:
+            pending.pop(current_id, None)
 
     async def send_cmd_best_effort(
         ws,
@@ -118,47 +129,47 @@ async def _cdp_screenshot(
         except Exception as exc:
             print(f"[CDP]  best-effort {method} failed: {exc}")
 
-    async with websockets.connect(ws_url, max_size=50 * 1024 * 1024) as ws:
+    async with httpx.AsyncClient(verify=False) as http:
+        new_target = await http.put(f"{cdp_url}/json/new?{quote(target_url, safe='')}", timeout=10)
+        new_target.raise_for_status()
+        page_target = new_target.json()
+        page_target_id = page_target["id"]
+        page_ws_url = page_target["webSocketDebuggerUrl"]
+        page_ws_url = page_ws_url.replace("wss://", "ws://")
+        page_ws_url = page_ws_url.replace(f"{urlparse(page_ws_url).hostname}:{urlparse(page_ws_url).port}", f"{parsed_ws.hostname}:{parsed_ws.port}")
+
+    async with websockets.connect(page_ws_url, max_size=50 * 1024 * 1024) as ws:
         reader_task = asyncio.create_task(_reader(ws))
         try:
-            target = await send_cmd(ws, "Target.createTarget", {"url": "about:blank"})
-            target_id = target["result"]["targetId"]
-            attached = await send_cmd(
-                ws,
-                "Target.attachToTarget",
-                {"targetId": target_id, "flatten": True},
-            )
-            session_id = attached["result"]["sessionId"]
-
-            await send_cmd(ws, "Page.enable", session_id=session_id)
-            await send_cmd(ws, "Page.bringToFront", session_id=session_id)
+            await send_cmd(ws, "Page.enable")
+            await send_cmd(ws, "Page.bringToFront")
             await send_cmd(
                 ws,
                 "Emulation.setDeviceMetricsOverride",
                 {"width": 1280, "height": 720, "deviceScaleFactor": 1, "mobile": False},
-                session_id=session_id,
             )
-            nav = await send_cmd(ws, "Page.navigate", {"url": target_url}, session_id=session_id)
-            print(f"[CDP]  navigate result: {nav.get('result', {})}")
+            await send_cmd_best_effort(ws, "Page.navigate", {"url": target_url})
+            print(f"[CDP]  navigate target={target_url}")
 
             # Give the page time to load and render
-            await asyncio.sleep(5)
-            await send_cmd_best_effort(ws, "Page.stopLoading", session_id=session_id)
+            await asyncio.sleep(8)
+            await send_cmd_best_effort(ws, "Page.stopLoading")
 
             result = await send_cmd(
                 ws,
                 "Page.captureScreenshot",
                 {"format": "png", "fromSurface": True},
-                session_id=session_id,
             )
             return base64.b64decode(result["result"]["data"])
         finally:
-            await send_cmd_best_effort(ws, "Target.closeTarget", {"targetId": target_id} if "target_id" in locals() else None)
             reader_task.cancel()
             try:
                 await reader_task
             except (asyncio.CancelledError, Exception):
                 pass
+            if page_target_id:
+                async with httpx.AsyncClient(verify=False) as http:
+                    await http.get(f"{cdp_url}/json/close/{page_target_id}", timeout=5)
 
 
 @pytest.mark.asyncio
@@ -185,6 +196,7 @@ async def test_full_lifecycle(api: httpx.AsyncClient):
                     "--no-sandbox",
                     "--disable-gpu",
                     "--disable-dev-shm-usage",
+                    "--ignore-certificate-errors",
                     "--remote-debugging-address=0.0.0.0",
                     f"--remote-debugging-port={CDP_CONTAINER_PORT}",
                     "about:blank",

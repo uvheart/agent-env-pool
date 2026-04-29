@@ -95,7 +95,13 @@ python -m agent_env_pool --host 0.0.0.0 --port 8100
 
 ## Quickstart
 
-### Boot a single container
+agent-env-pool supports three common ways to start environments:
+
+1. **Single boot** — start one container, use it, then shut it down. See the full lifecycle test in [`tests/test_e2e_browser.py`](tests/test_e2e_browser.py).
+2. **Batch rollout** — send one API request with `count=N`; the service creates N containers under one `rollout_id`, then you can query or shut down the whole rollout.
+3. **Parallel boot requests** — your client sends many `/servers/boot` requests concurrently; each worker owns its own full lifecycle. See the 10-concurrent E2E test in [`tests/test_e2e_parallel_browser.py`](tests/test_e2e_parallel_browser.py).
+
+### 1. Boot a single container
 
 ```bash
 SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
@@ -115,7 +121,9 @@ SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
 echo $SERVER | python3 -m json.tool
 ```
 
-### Batch rollout — boot 10 containers at once
+Use this when you need one sandbox for one task or one agent session. The E2E test boots Chrome, waits for CDP, captures a screenshot, checks detail/list APIs, and shuts the container down.
+
+### 2. Batch rollout — boot 10 containers with one request
 
 ```bash
 ROLLOUT=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
@@ -136,9 +144,47 @@ ROLLOUT_ID=$(echo $ROLLOUT | python3 -c "import sys,json; print(json.load(sys.st
 # Check rollout status
 curl -s "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID" | python3 -m json.tool
 
+# Need full metadata/endpoints/resource IDs? Add verbose=true.
+curl -s "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID?verbose=true" | python3 -m json.tool
+
 # Shut down all 10 at once
 curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
+
+Use this when the server should manage a group as one rollout. The default response is compact for CLI use; add `?verbose=true` when you need full metadata, endpoints, resource IDs, and timestamps.
+
+### 3. Parallel boot requests — client-side concurrency
+
+```python
+import asyncio
+import httpx
+
+payload = {
+    "env_type": "browser-use",
+    "image": "zenika/alpine-chrome:124",
+    "endpoints": [
+        {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    ],
+    "metadata": {
+        "command": ["--no-sandbox", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222", "about:blank"],
+        "security_opt": ["seccomp=unconfined"],
+    },
+}
+
+async def boot_one(client: httpx.AsyncClient):
+    response = await client.post(f"{AGENT_ENV_POOL_URL}/api/v1/servers/boot", json=payload)
+    response.raise_for_status()
+    return response.json()["data"]
+
+async def main():
+    async with httpx.AsyncClient(timeout=180) as client:
+        servers = await asyncio.gather(*(boot_one(client) for _ in range(10)))
+        print(f"booted {len(servers)} containers")
+
+asyncio.run(main())
+```
+
+Use this when callers are truly concurrent, for example 10 agents asking for sandboxes at the same time. The E2E test sends 10 concurrent boot requests, runs CDP screenshot/detail/list/shutdown for every worker, and prints the success rate.
 
 ### Use any image
 
