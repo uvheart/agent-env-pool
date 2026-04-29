@@ -15,6 +15,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Notify Feishu - Start
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/ci/notify-feishu.sh start "E2E 全生命周期测试"
+
       - name: Install dependencies
         run: python3 -m pip install --user -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
 
@@ -31,8 +37,16 @@ jobs:
         if: always()
         run: rm -f agent_env_pool_e2e_*.db
 
-      - name: Notify Feishu on failure
+      - name: Notify Feishu - Success
+        if: success()
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/ci/notify-feishu.sh success "E2E 全生命周期测试"
+
+      - name: Notify Feishu - Failure
         if: failure()
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        run: scripts/ci/notify-feishu.sh failure "agent-env-pool E2E failed"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/ci/notify-feishu.sh failure "E2E 全生命周期测试"

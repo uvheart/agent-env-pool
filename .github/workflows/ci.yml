@@ -20,6 +20,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Notify Feishu - Start
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/ci/notify-feishu.sh start "CI 基础检查"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -43,8 +49,16 @@ jobs:
       - name: Docker build
         run: docker build -t agent-env-pool:ci .
 
-      - name: Notify Feishu on failure
+      - name: Notify Feishu - Success
+        if: success()
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/ci/notify-feishu.sh success "CI 基础检查"
+
+      - name: Notify Feishu - Failure
         if: failure()
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        run: scripts/ci/notify-feishu.sh failure "agent-env-pool CI failed"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/ci/notify-feishu.sh failure "CI 基础检查"
