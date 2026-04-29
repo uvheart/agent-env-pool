@@ -84,6 +84,8 @@ SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
     "metadata": {
       "command": [
         "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
         "--remote-debugging-address=0.0.0.0",
         "--remote-debugging-port=9222",
         "about:blank"

@@ -183,6 +183,8 @@ async def test_full_lifecycle(api: httpx.AsyncClient):
             "metadata": {
                 "command": [
                     "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
                     "--remote-debugging-address=0.0.0.0",
                     f"--remote-debugging-port={CDP_CONTAINER_PORT}",
                     "about:blank",
