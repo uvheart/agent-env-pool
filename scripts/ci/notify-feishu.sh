@@ -23,6 +23,28 @@ ACTOR="${GITHUB_ACTOR:-${ACTOR:-$(git config user.name 2>/dev/null || echo unkno
 JOB="${GITHUB_JOB:-${JOB:-}}"
 EVENT="${GITHUB_EVENT_NAME:-${EVENT:-local-pipeline}}"
 START_TIME="${START_TIME:-$(date -u '+%Y-%m-%d %H:%M:%S UTC')}"
+HOST_NAME="${HOST_NAME:-$(hostname 2>/dev/null || echo unknown)}"
+RUNNER_NAME_VALUE="${RUNNER_NAME:-}"
+WORKFLOW_NAME="${GITHUB_WORKFLOW:-${WORKFLOW_NAME:-$WORKFLOW}}"
+
+if [[ -z "${TRIGGER_SOURCE:-}" ]]; then
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    if [[ "${RUNNER_NAME_VALUE}" == *"agent-env-pool-e2e"* ]] || [[ "${RUNNER_NAME_VALUE}" == *"alaya"* ]] || [[ "$WORKFLOW_NAME" == "E2E" ]] || [[ "$WORKFLOW_NAME" == "Release" ]]; then
+      TRIGGER_SOURCE="测试机器（alaya） / GitHub Actions / ${WORKFLOW_NAME} / ${JOB:-unknown-job}"
+    else
+      TRIGGER_SOURCE="GitHub Actions / ${WORKFLOW_NAME} / ${JOB:-unknown-job}"
+    fi
+    if [[ -n "$RUNNER_NAME_VALUE" ]]; then
+      TRIGGER_SOURCE="${TRIGGER_SOURCE} / runner: ${RUNNER_NAME_VALUE}"
+    fi
+  else
+    if [[ "$HOST_NAME" == "liuhui" ]]; then
+      TRIGGER_SOURCE="开发机器（wl） / local shell / host: ${HOST_NAME}"
+    else
+      TRIGGER_SOURCE="本地机器 / local shell / host: ${HOST_NAME}"
+    fi
+  fi
+fi
 
 # Fetch commit message
 COMMIT_MSG=""
@@ -33,6 +55,7 @@ if [[ -n "${SHA}" ]] && [[ -n "${GITHUB_TOKEN:-}" ]]; then
 fi
 
 export STATUS WORKFLOW EXTRA REPO REF SHA SHORT_SHA RUN_ID RUN_URL ACTOR JOB EVENT START_TIME COMMIT_MSG
+export HOST_NAME RUNNER_NAME_VALUE WORKFLOW_NAME TRIGGER_SOURCE
 
 # Build and send interactive card
 python3 -c '
@@ -52,6 +75,7 @@ start_time = os.environ.get("START_TIME", "")
 commit_msg = os.environ.get("COMMIT_MSG", "")
 job = os.environ.get("JOB", "")
 extra = os.environ.get("EXTRA", "")
+trigger_source = os.environ.get("TRIGGER_SOURCE", "")
 
 STATUS_CFG = {
     "start":   {"color": "blue",   "icon": "\U0001f680", "label": "\u5f00\u59cb\u8fd0\u884c"},
@@ -66,6 +90,8 @@ elements = []
 col_left = []
 if actor:
     col_left.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f464 **\u89e6\u53d1\u8005**\n{actor}"}})
+if trigger_source:
+    col_left.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f4cd **\u89e6\u53d1\u6765\u6e90**\n{trigger_source}"}})
 col_left.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f4c5 **\u5f00\u59cb\u65f6\u95f4**\n{start_time}"}})
 
 col_right = []
