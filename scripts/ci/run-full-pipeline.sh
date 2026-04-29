@@ -234,6 +234,16 @@ print(f\"{r['status']}|{r['conclusion'] or ''}|{r.get('run_started_at') or ''}\"
   done
 }
 
+dispatch_workflow() {
+  local workflow_file="$1" ref="$2" workflow_name="$3" expected_sha="$4"
+  log "主动触发 $workflow_name"
+  echo "   workflow: $workflow_file"
+  echo "   ref:      $ref"
+  echo "   commit:   ${expected_sha:0:7}"
+  gh_api -X POST "https://api.github.com/repos/$REPO/actions/workflows/$workflow_file/dispatches" \
+    -d "{\"ref\":\"$ref\"}" >/dev/null
+}
+
 wait_merge() {
   local deadline=$((SECONDS + PIPELINE_TIMEOUT))
   log "等待 PR #$PR_NUMBER 自动合并到 main..."
@@ -310,6 +320,7 @@ else
   HEAD_SHA="$(git rev-parse HEAD)"
   RELEASE_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo unknown)"
   RELEASE_NOTES="$(git log -1 --format=%s 2>/dev/null || true)"
+  COMMIT_MSG="${PIPELINE_COMMIT_MSG:-$RELEASE_NOTES}"
   echo "   commit: ${HEAD_SHA:0:7}"
   echo "   version: v$RELEASE_VERSION"
 fi
@@ -422,6 +433,7 @@ hr
 
 # ── Step 7: 等待 Docker Release ───────────────────────────────────────
 notify start "Step 7: Docker Release"
+dispatch_workflow "docker-publish.yml" "main" "Release" "$HEAD_SHA"
 if wait_workflow "Release" "main" "$HEAD_SHA"; then
   notify success "Step 7: Docker Release"
 else

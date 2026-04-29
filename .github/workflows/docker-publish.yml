@@ -135,7 +135,7 @@ jobs:
       - name: Create GitHub Release
         if: github.ref_type == 'branch' && github.ref_name == 'main'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
           NOTES: ${{ steps.release.outputs.notes }}
           SHA_TAG: ${{ steps.image.outputs.sha_tag }}
@@ -159,11 +159,42 @@ jobs:
           EOF
           )"
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes "$BODY"
+          API="${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/releases"
+          EXISTING_ID="$(curl -fsS \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/tags/${TAG}" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id", ""))' 2>/dev/null || true)"
+
+          PAYLOAD="$(mktemp)"
+          TAG="$TAG" BODY="$BODY" python3 - <<'PY' > "$PAYLOAD"
+          import json
+          import os
+
+          print(json.dumps({
+              "tag_name": os.environ["TAG"],
+              "target_commitish": os.environ["GITHUB_SHA"],
+              "name": os.environ["TAG"],
+              "body": os.environ["BODY"],
+              "draft": False,
+              "prerelease": False,
+          }, ensure_ascii=False))
+          PY
+
+          if [[ -n "$EXISTING_ID" ]]; then
+            curl -fsS -X PATCH \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${API}/${EXISTING_ID}" \
+              -d @"$PAYLOAD" >/dev/null
           else
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$BODY"
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "$API" \
+              -d @"$PAYLOAD" >/dev/null
           fi
+          rm -f "$PAYLOAD"
 
       - name: Cleanup release database
         if: always()

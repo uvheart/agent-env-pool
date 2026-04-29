@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.2 - 2026-04-29 07:29:36 UTC
+
+- 修复 Release 触发与 GitHub Release 创建：自动 dispatch Release，并使用 curl API 创建 release 页面
+
 ## v0.1.1 - 2026-04-29 07:10:57 UTC
 
 - 创建 GitHub Release 页面，并在 Release 中展示 Docker 镜像 tag 与版本说明
