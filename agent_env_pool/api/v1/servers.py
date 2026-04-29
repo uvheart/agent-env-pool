@@ -12,9 +12,12 @@ from agent_env_pool.schemas import (
     BootServerRequest,
     RolloutBootRequest,
     RolloutBootResponse,
+    RolloutBootSimpleResponse,
     RolloutDetailResponse,
+    RolloutDetailSimpleResponse,
     ServerListResponse,
     ServerResponse,
+    ServerSummaryResponse,
 )
 from agent_env_pool.services.env_service import EnvService
 
@@ -46,6 +49,24 @@ def _to_response(record) -> ServerResponse:
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
+
+
+def _to_summary(record) -> ServerSummaryResponse:
+    return ServerSummaryResponse(
+        server_id=record.server_id,
+        status=record.status,
+        cdp_url=record.cdp_url,
+        host=record.host,
+        port=record.port,
+        error_message=record.error_message,
+    )
+
+
+def _status_counts(records) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record.status] = counts.get(record.status, 0) + 1
+    return counts
 
 
 @router.post("/servers/boot", response_model=ServerResponse)
@@ -142,9 +163,10 @@ async def get_server_logs(
     return await svc.container_logs(db, server_id, tail=tail)
 
 
-@router.post("/rollout/boot", response_model=RolloutBootResponse)
+@router.post("/rollout/boot", response_model=RolloutBootSimpleResponse | RolloutBootResponse)
 async def rollout_boot(
     req: RolloutBootRequest,
+    verbose: bool = Query(False, description="Return full server objects"),
     db: AsyncSession = Depends(get_session),
     svc: EnvService = Depends(get_env_service),
 ):
@@ -158,6 +180,14 @@ async def rollout_boot(
         endpoints=[endpoint.model_dump() for endpoint in req.endpoints] if req.endpoints else None,
         metadata=req.metadata,
     )
+    if not verbose:
+        return RolloutBootSimpleResponse(
+            rollout_id=result["rollout_id"],
+            server_ids=result["server_ids"],
+            servers=[_to_summary(s) for s in result["servers"]],
+            total=len(result["servers"]),
+            status_counts=_status_counts(result["servers"]),
+        )
     return RolloutBootResponse(
         rollout_id=result["rollout_id"],
         server_ids=result["server_ids"],
@@ -165,14 +195,22 @@ async def rollout_boot(
     )
 
 
-@router.get("/rollout/{rollout_id}", response_model=RolloutDetailResponse)
+@router.get("/rollout/{rollout_id}", response_model=RolloutDetailSimpleResponse | RolloutDetailResponse)
 async def get_rollout(
     rollout_id: str,
+    verbose: bool = Query(False, description="Return full server objects"),
     db: AsyncSession = Depends(get_session),
     svc: EnvService = Depends(get_env_service),
 ):
     """List all sandboxes created for one rollout."""
     result = await svc.list_rollout(db, rollout_id)
+    if not verbose:
+        return RolloutDetailSimpleResponse(
+            rollout_id=result["rollout_id"],
+            servers=[_to_summary(s) for s in result["servers"]],
+            total=result["total"],
+            status_counts=result["status_counts"],
+        )
     return RolloutDetailResponse(
         rollout_id=result["rollout_id"],
         servers=[_to_response(s) for s in result["servers"]],

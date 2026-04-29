@@ -94,6 +94,27 @@ class ServerListResponse(BaseModel):
     total: int
 
 
+class ServerSummaryResponse(BaseModel):
+    """Compact server fields for CLI-friendly rollout responses."""
+
+    server_id: str
+    status: str
+    cdp_url: str | None = None
+    host: str | None = None
+    port: int | None = None
+    error_message: str | None = None
+
+
+class RolloutBootSimpleResponse(BaseModel):
+    """Compact result of a batch rollout boot operation."""
+
+    rollout_id: str
+    server_ids: list[str]
+    servers: list[ServerSummaryResponse]
+    total: int
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class RolloutBootResponse(BaseModel):
     """Result of a batch rollout boot operation."""
 
@@ -107,5 +128,14 @@ class RolloutDetailResponse(BaseModel):
 
     rollout_id: str
     servers: list[ServerResponse]
+    total: int
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class RolloutDetailSimpleResponse(BaseModel):
+    """Compact rollout inventory for CLI-friendly status checks."""
+
+    rollout_id: str
+    servers: list[ServerSummaryResponse]
     total: int
     status_counts: dict[str, int] = Field(default_factory=dict)

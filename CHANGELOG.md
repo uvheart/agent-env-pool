@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.4 - 2026-04-29 10:11:02 UTC
+
+- Add parallel lifecycle E2E coverage, document single/batch/parallel usage, and make rollout responses compact by default with verbose detail available.
+
 ## v0.1.3 - 2026-04-29 08:01:55 UTC
 
 - Fix batch rollout Docker container naming and document Chrome startup metadata so README local rollout boots successfully.

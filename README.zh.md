@@ -97,7 +97,13 @@ python -m agent_env_pool --host 0.0.0.0 --port 8100
 
 ## 快速开始
 
-### 启动单个容器
+agent-env-pool 支持 3 种常见启动方式：
+
+1. **单开** — 启动一个容器，使用完后关闭。完整生命周期测试见 [`tests/test_e2e_browser.py`](tests/test_e2e_browser.py)。
+2. **一次开多个** — 一个 API 请求传 `count=N`，服务端创建 N 个容器，并用同一个 `rollout_id` 管理，后续可以整体查询或整体关闭。
+3. **并行开多个** — 客户端同时发多个 `/servers/boot` 请求，每个 worker 独立完成自己的生命周期。10 并发 E2E 测试见 [`tests/test_e2e_parallel_browser.py`](tests/test_e2e_parallel_browser.py)。
+
+### 1. 单开：启动单个容器
 
 ```bash
 SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
@@ -117,7 +123,9 @@ SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
 echo $SERVER | python3 -m json.tool
 ```
 
-### 批量启动 — 一次 10 个容器
+适合一个任务或一个 Agent 会话独占一个沙箱。测试用例会启动 Chrome、等待 CDP ready、截图、检查详情/列表接口，最后关闭容器。
+
+### 2. 一次开多个：一个请求启动 10 个容器
 
 ```bash
 ROLLOUT=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
@@ -138,9 +146,47 @@ ROLLOUT_ID=$(echo $ROLLOUT | python3 -c "import sys,json; print(json.load(sys.st
 # 查看 rollout 状态
 curl -s "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID" | python3 -m json.tool
 
+# 需要完整 metadata/endpoints/resource_id 时，加 verbose=true
+curl -s "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID?verbose=true" | python3 -m json.tool
+
 # 一次性关闭全部 10 个
 curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
+
+适合服务端按一组 rollout 管理容器。默认响应是精简版，方便 curl 查看；需要完整 `metadata/endpoints/resource_id/timestamps` 时，加 `?verbose=true`。
+
+### 3. 并行开多个：客户端同时发请求
+
+```python
+import asyncio
+import httpx
+
+payload = {
+    "env_type": "browser-use",
+    "image": "zenika/alpine-chrome:124",
+    "endpoints": [
+        {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
+    ],
+    "metadata": {
+        "command": ["--no-sandbox", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222", "about:blank"],
+        "security_opt": ["seccomp=unconfined"],
+    },
+}
+
+async def boot_one(client: httpx.AsyncClient):
+    response = await client.post(f"{AGENT_ENV_POOL_URL}/api/v1/servers/boot", json=payload)
+    response.raise_for_status()
+    return response.json()["data"]
+
+async def main():
+    async with httpx.AsyncClient(timeout=180) as client:
+        servers = await asyncio.gather(*(boot_one(client) for _ in range(10)))
+        print(f"启动了 {len(servers)} 个容器")
+
+asyncio.run(main())
+```
+
+适合真实调用方就是并发的场景，比如 10 个 Agent 同时申请沙箱。E2E 测试会并发发 10 个 boot 请求，并让每个 worker 完成 CDP 截图、详情查询、列表校验和 shutdown，最后统计成功率。
 
 ### 使用任意镜像
 
