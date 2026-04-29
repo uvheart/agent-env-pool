@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
@@ -94,7 +94,7 @@ class EnvService:
             record.endpoints_json = json.dumps(instance.endpoints)
             record.metadata_json = json.dumps({**metadata, **instance.metadata})
             record.status = ServerStatus.RUNNING
-            record.updated_at = datetime.utcnow()
+            record.updated_at = datetime.now(timezone.utc)
             db.add(record)
             await db.merge(record)
             await db.commit()
@@ -170,8 +170,8 @@ class EnvService:
                     "status": ServerStatus.STARTING,
                     "endpoints_json": "[]",
                     "metadata_json": metadata_str,
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
                 },
             )
             await conn.execute(text("COMMIT"))
@@ -314,7 +314,7 @@ class EnvService:
                 continue
             record.status = ServerStatus.ERROR
             record.error_message = "runtime resource missing; container may have been removed externally"
-            record.updated_at = datetime.utcnow()
+            record.updated_at = datetime.now(timezone.utc)
             db.add(record)
             changed += 1
 
@@ -416,7 +416,7 @@ class EnvService:
         await db.execute(
             update(EnvServer)
             .where(EnvServer.server_id == server_id)
-            .values(status=status, updated_at=datetime.utcnow())
+            .values(status=status, updated_at=datetime.now(timezone.utc))
         )
         await db.commit()
 
@@ -427,7 +427,7 @@ class EnvService:
             .values(
                 status=ServerStatus.ERROR,
                 error_message=msg[:1024],
-                updated_at=datetime.utcnow(),
+                updated_at=datetime.now(timezone.utc),
             )
         )
         await db.commit()

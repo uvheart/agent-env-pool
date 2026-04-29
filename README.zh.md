@@ -5,12 +5,14 @@
 <h1 align="center">agent-env-pool</h1>
 
 <p align="center">
-  轻量级单节点 Docker 沙箱池，专为 Agent RL rollout 设计。
+  一个 API 批量管理 Docker 容器 — 一键启动数百个沙箱，自动追踪，自动清理。
 </p>
 
 <p align="center">
   <a href="https://hub.docker.com/r/uvheart280/agent-env-pool"><img src="https://img.shields.io/docker/v/uvheart280/agent-env-pool?label=docker&color=blue" alt="Docker" /></a>
-  <a href="./README.md">English</a>
+</p>
+<p align="center">
+   <a href="./README.md">English</a>
 </p>
 
 <p align="center">
@@ -19,13 +21,35 @@
 
 ---
 
-`agent-env-pool` 只做一件事：可靠地启动、追踪和释放 Docker 沙箱，让研究者不再需要手动处理 Docker 端点、端口、配额和清理。
+## 为什么需要 agent-env-pool？
+
+跑 10 个 Docker 容器很简单。但同时跑 200 个 — 每个镜像不同、端口不同、健康检查不同、生命周期不同 — 就是另一回事了。`agent-env-pool` 把这件事变成一次 API 调用。
+
+**核心优势：**
+
+- **任意镜像** — Chrome、Playwright、code-server、VNC 桌面、ML Worker、Agent CLI — 只要能跑在 Docker 里，就能被管理
+- **批量启动** — 一个请求启动 N 个容器，自动配额管控、自动端口分配
+- **健康检查感知** — 内置 CDP / HTTP / TCP 就绪探针，API 返回 "running" 时容器已经可用
+- **自动清理** — 孤儿容器检测、强制关闭、按 rollout 批量回收
+- **零配置网络** — Docker 自动分配临时宿主端口，无需手动映射
+- **池化复用** — acquire/release 模式让热容器保持待命，适合长时间工作负载
+- **全链路追踪** — 每个 API 响应都带 `trace_id`，方便排查
+
+## 适用场景
+
+| 场景 | 镜像示例 | 端点 | 用 agent-env-pool 的好处 |
+|---|---|---|---|
+| 大规模浏览器自动化 | `zenika/alpine-chrome:124` | CDP `:9222` | 一键启动 50 个 Chrome，每个都有 CDP 就绪检查，自动清理 |
+| AI Agent 沙箱 | Claude Code / Codex / Gemini CLI | API / 流 | 每个 Agent 会话一个隔离环境，配额管控 |
+| RL 训练 Rollout | 自定义训练镜像 | 任意 | 批量启动训练 Worker，跟踪生命周期，收集结果 |
+| Playwright / 爬虫集群 | 任意无头浏览器 | HTTP / WS | 跨任务池化复用，无端口冲突 |
+| Code-server / 开发环境 | `codercom/code-server` | HTTP `:8080` | 按需创建开发环境，自带健康检查 |
+| VNC 远程桌面 | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WS | 批量桌面供应，自动端口分配 |
+| CI/CD 测试矩阵 | 任意测试镜像 | 各种 | 并行启动测试环境，完成后自动回收 |
 
 ## 安装
 
 ### 方案一：Docker 启动（推荐）
-
-无需 Python 环境，仅需 Docker。
 
 ```bash
 docker run -d \
@@ -39,23 +63,23 @@ docker run -d \
 export AGENT_ENV_POOL_URL=http://127.0.0.1:8100
 ```
 
-> 国内如果拉取超时，请先为 Docker 配置代理或镜像加速器。
+> 国内拉取超时请先配置 Docker 镜像加速器。
 
-在共享测试机或 CI runner 上，`8100` 端口可能已经被长期运行的服务占用。此时不要固定映射 `8100:8100`，改用随机宿主端口：
+在共享主机上 `8100` 可能被占用，改用随机端口：
 
 ```bash
 docker run -d \
-  --name agent-env-pool-smoke \
+  --name agent-env-pool \
   -p 127.0.0.1::8100 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --add-host host.docker.internal:host-gateway \
   -e AGENT_ENV_POOL_DOCKER_READY_HOST=host.docker.internal \
   uvheart280/agent-env-pool:latest
 
-export AGENT_ENV_POOL_URL=http://127.0.0.1:$(docker inspect -f '{{(index (index .NetworkSettings.Ports "8100/tcp") 0).HostPort}}' agent-env-pool-smoke)
+export AGENT_ENV_POOL_URL=http://127.0.0.1:$(docker inspect -f '{{(index (index .NetworkSettings.Ports "8100/tcp") 0).HostPort}}' agent-env-pool)
 ```
 
-验证服务已启动：
+验证：
 
 ```bash
 curl "$AGENT_ENV_POOL_URL/api/v1/servers"
@@ -67,29 +91,13 @@ curl "$AGENT_ENV_POOL_URL/api/v1/servers"
 ```bash
 git clone https://github.com/uvheart/agent-env-pool.git
 cd agent-env-pool
-
-conda create -n agent-env-pool python=3.11 -y
-conda activate agent-env-pool
-
 pip install -r requirements.txt
-
 python -m agent_env_pool --host 0.0.0.0 --port 8100
-export AGENT_ENV_POOL_URL=http://127.0.0.1:8100
 ```
 
 ## 快速开始
 
-> **前提**：`agent-env-pool` 只是调度层，沙箱镜像需要预先拉取到宿主机。
-
-### 第一步：拉取浏览器沙箱镜像
-
-```bash
-docker pull zenika/alpine-chrome:124
-```
-
-> `zenika/alpine-chrome:124` 可通过下面的命令在 `9222` 端口暴露 Chrome DevTools Protocol。你也可以使用任何自定义 CDP 镜像。
-
-### 第二步：启动一个浏览器沙箱
+### 启动单个容器
 
 ```bash
 SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
@@ -101,157 +109,113 @@ SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
       {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ],
     "metadata": {
-      "command": [
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--remote-debugging-address=0.0.0.0",
-        "--remote-debugging-port=9222",
-        "about:blank"
-      ],
+      "command": ["--no-sandbox", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222", "about:blank"],
       "security_opt": ["seccomp=unconfined"]
     }
   }')
 
-echo $SERVER
-# 返回 server_id、cdp_url、status、endpoints
+echo $SERVER | python3 -m json.tool
 ```
 
-### 第三步：运行 E2E 测试
-
-E2E 测试会自动完成：启动浏览器沙箱 → CDP 连接 → 渲染本地测试页面 → 截图保存 → 验证 API → 关闭沙箱。
+### 批量启动 — 一次 10 个容器
 
 ```bash
-# 安装测试依赖（方案二用户；方案一用户也需在本地执行）
-pip install pytest pytest-asyncio
+ROLLOUT=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
+  -H 'content-type: application/json' \
+  -d '{
+    "count": 10,
+    "env_type": "browser-use",
+    "image": "zenika/alpine-chrome:124",
+    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
+  }')
 
-python -m pytest tests/test_e2e_browser.py -v -s
+ROLLOUT_ID=$(echo $ROLLOUT | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['rollout_id'])")
+
+# 查看 rollout 状态
+curl -s "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID" | python3 -m json.tool
+
+# 一次性关闭全部 10 个
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
 
-预期输出：
+### 使用任意镜像
 
+```bash
+# Code-server + HTTP 健康检查
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "custom",
+    "image": "codercom/code-server:latest",
+    "endpoints": [
+      {"name": "http", "container_port": 8080, "protocol": "http", "ready_check": {"type": "http", "path": "/"}}
+    ]
+  }'
+
+# 自定义 ML Worker + TCP 检查
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "custom",
+    "image": "my-ml-worker:latest",
+    "endpoints": [
+      {"name": "grpc", "container_port": 50051, "protocol": "tcp", "ready_check": {"type": "tcp"}}
+    ]
+  }'
 ```
-[BOOT]       server_id=...
-[BOOT]       cdp_url=http://127.0.0.1:XXXXX
-[CDP]        browser ready: Chrome/...
-[CDP]        ws_url=ws://127.0.0.1:XXXXX/devtools/browser/...
-[SCREENSHOT] saved tests/screenshot_baidu.png (87.x KB)
-[SHUTDOWN]   {'message': 'success'}
-PASSED
-```
 
-截图保存在 `tests/screenshot_baidu.png`。
-
-CI 和 release E2E 必须使用这条完整生命周期路径。不要在发布验证中使用池化复用，因为发布检查需要证明全新的沙箱可以正常启动、提供 CDP、完成浏览器操作，并被干净关闭。
-
-### 第四步：关闭沙箱
+### 关闭容器
 
 ```bash
 SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['server_id'])")
 curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
 
-## API
+## API 参考
 
-### 启动沙箱
+### 核心接口
 
-```bash
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
-  -H 'content-type: application/json' \
-  -d '{
-    "env_type": "browser-use",
-    "image": "zenika/alpine-chrome:124",
-    "endpoints": [
-      {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
-    ]
-  }'
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/servers/boot` | 启动单个容器 |
+| `POST` | `/api/v1/servers/{id}/shutdown` | 关闭容器 |
+| `GET` | `/api/v1/servers` | 列出所有活跃容器 |
+| `GET` | `/api/v1/servers/{id}` | 获取容器详情 |
+| `GET` | `/api/v1/servers/{id}/logs` | 获取容器日志 |
 
-响应字段：`server_id`、`status`、`cdp_url`、`endpoints[].host_port`、`endpoints[].url`。
+### 池化（acquire/release）
 
-自定义镜像（HTTP + TCP 端点）示例：
-
-```json
-{
-  "env_type": "custom",
-  "image": "my-sandbox:latest",
-  "endpoints": [
-    {"name": "api", "container_port": 8080, "protocol": "http", "ready_check": {"type": "http", "path": "/health"}},
-    {"name": "stream", "container_port": 9000, "protocol": "tcp", "ready_check": {"type": "tcp"}}
-  ]
-}
-```
-
-### 可选：获取与释放（池化复用）
-
-这个 API 适合长期运行的 worker pool。CI/release 验证应使用上面的直接启动和关闭流程，确保每次都验证全新的沙箱生命周期。
-
-```bash
-# 可选池化 API，适合长期 worker；不要用于 CI/release E2E。
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/pool/acquire" \
-  -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9222,"protocol":"cdp","ready_check":{"type":"cdp"}}],"metadata":{"command":["--no-sandbox","--remote-debugging-address=0.0.0.0","--remote-debugging-port=9222","about:blank"]}}'
-
-# 用完释放回空闲池
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/pool/release/$SERVER_ID"
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/pool/acquire` | 获取空闲容器或启动新容器 |
+| `POST` | `/api/v1/pool/release/{id}` | 释放回池 |
 
 ### 批量 Rollout
 
-```bash
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
-  -H 'content-type: application/json' \
-  -d '{
-    "count": 4,
-    "env_type": "browser-use",
-    "image": "zenika/alpine-chrome:124",
-    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
-  }'
-
-curl "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID"
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
-```
-
-### 列表、详情与日志
-
-```bash
-curl "$AGENT_ENV_POOL_URL/api/v1/servers"
-curl "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID"
-curl "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID/logs?tail=200"
-```
-
-所有响应均包含请求追踪：
-
-```json
-{"meta": {"trace_id": "..."}, "data": {}}
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/rollout/boot` | 批量启动 N 个容器 |
+| `GET` | `/api/v1/rollout/{rollout_id}` | 查看 rollout 状态 |
+| `POST` | `/api/v1/rollout/{rollout_id}/shutdown` | 关闭整个 rollout |
 
 ## Python SDK
 
 ```python
-import os
-
 from agent_env_pool import EnvPoolClient
 
-pool = EnvPoolClient(os.getenv("AGENT_ENV_POOL_URL", "http://127.0.0.1:8100"))
+pool = EnvPoolClient("http://127.0.0.1:8100")
 
-with pool.acquire(endpoints=[
+# 单个容器
+with pool.acquire(image="zenika/alpine-chrome:124", endpoints=[
     {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
 ]) as env:
-    print(env.server_id)
-    print(env.cdp_url)   # 在此连接你的 Agent
+    print(env.cdp_url)  # 在此连接你的 Agent
+
+# 批量启动
+rollout = pool.rollout_boot(count=20, image="my-worker:latest", endpoints=[...])
+print(f"启动了 {len(rollout.server_ids)} 个 Worker")
+pool.rollout_shutdown(rollout.rollout_id)
 ```
-
-## 适用场景
-
-| 沙箱类型 | 镜像示例 | 端点 |
-|---|---|---|
-| Chrome / 浏览器自动化 | `zenika/alpine-chrome:124` | CDP on `9222` |
-| Playwright / 爬虫 | 任意 | HTTP 或 WebSocket |
-| VS Code / code-server | `codercom/code-server` | HTTP |
-| VNC 桌面 | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |
-| Agent CLI（Claude Code、Codex、Gemini CLI、Qwen Code、Kimi CLI） | 自定义 | API / 流端口 |
-| RL 训练 Worker | 自定义 | 任意 |
 
 ## 沙箱生命周期
 
@@ -261,7 +225,7 @@ starting → running → occupied → stopping → stopped
                         error
 ```
 
-`starting`、`running`、`occupied`、`stopping` 均占用配额。配额通过 SQLite `BEGIN IMMEDIATE` 事务在 Docker 启动前原子检查并写入。
+配额通过 SQLite `BEGIN IMMEDIATE` 事务在容器创建前原子检查。`starting`、`running`、`occupied`、`stopping` 均计入活跃配额（默认上限：32）。
 
 ## 路线图
 

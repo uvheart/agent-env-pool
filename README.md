@@ -5,12 +5,14 @@
 <h1 align="center">agent-env-pool</h1>
 
 <p align="center">
-  A lightweight single-node Docker sandbox pool for Agent RL rollout.
+  Batch-manage Docker containers with one API — boot hundreds of sandboxes, track them, and clean up automatically.
 </p>
 
 <p align="center">
   <a href="https://hub.docker.com/r/uvheart280/agent-env-pool"><img src="https://img.shields.io/docker/v/uvheart280/agent-env-pool?label=docker&color=blue" alt="Docker" /></a>
-  <a href="./README.zh.md">中文文档</a>
+</p>
+<p align="center">
+   <a href="./README.zh.md">中文文档</a>
 </p>
 
 <p align="center">
@@ -19,13 +21,35 @@
 
 ---
 
-`agent-env-pool` does one thing well: reliably boot, track, and release Docker sandboxes so researchers spend less time wiring up Docker endpoints, ports, quota, and cleanup.
+## Why agent-env-pool?
+
+Running 10 Docker containers is easy. Running 200 — each with different images, ports, health checks, and lifecycle — is not. `agent-env-pool` turns that into a single API call.
+
+**Core advantages:**
+
+- **Any image** — Chrome, Playwright, code-server, VNC desktop, custom ML workers, Agent CLI — if it runs in Docker, agent-env-pool can manage it
+- **Batch rollout** — boot N containers in one request, with quota enforcement and automatic port allocation
+- **Health-check aware** — built-in CDP / HTTP / TCP readiness probes; your container is ready when the API says "running"
+- **Automatic cleanup** — orphan detection, force shutdown, and rollout-level teardown
+- **Zero config networking** — ephemeral host ports auto-assigned by Docker, no manual port mapping needed
+- **Pool reuse** — acquire/release pattern keeps warm containers for long-running workloads
+- **Trace everything** — every API response carries a `trace_id` for debugging
+
+## Use Cases
+
+| Scenario | Image | Endpoint | Why agent-env-pool? |
+|---|---|---|---|
+| Browser automation at scale | `zenika/alpine-chrome:124` | CDP `:9222` | Boot 50 Chrome instances, each with CDP ready-check, auto-cleanup |
+| AI Agent sandboxes | Claude Code / Codex / Gemini CLI | API / stream | Isolated environments per agent session, quota-controlled |
+| RL training rollout | custom training image | any | Batch boot training workers, track lifecycle, collect results |
+| Playwright / scraping farm | any headless browser | HTTP / WS | Pool reuse across scraping jobs, no port conflicts |
+| Code-server / dev envs | `codercom/code-server` | HTTP `:8080` | On-demand dev environments with health checks |
+| VNC remote desktop | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WS | Batch desktop provisioning with auto port assignment |
+| CI/CD test matrices | any test image | varies | Spin up test environments in parallel, tear down on completion |
 
 ## Installation
 
 ### Option A — Docker (recommended)
-
-No Python setup needed. Requires Docker.
 
 ```bash
 docker run -d \
@@ -39,19 +63,18 @@ docker run -d \
 export AGENT_ENV_POOL_URL=http://127.0.0.1:8100
 ```
 
-On shared hosts or CI runners where `8100` may already be in use, publish the
-container port to a random localhost port instead:
+On shared hosts where `8100` may be taken, use a random port:
 
 ```bash
 docker run -d \
-  --name agent-env-pool-smoke \
+  --name agent-env-pool \
   -p 127.0.0.1::8100 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --add-host host.docker.internal:host-gateway \
   -e AGENT_ENV_POOL_DOCKER_READY_HOST=host.docker.internal \
   uvheart280/agent-env-pool:latest
 
-export AGENT_ENV_POOL_URL=http://127.0.0.1:$(docker inspect -f '{{(index (index .NetworkSettings.Ports "8100/tcp") 0).HostPort}}' agent-env-pool-smoke)
+export AGENT_ENV_POOL_URL=http://127.0.0.1:$(docker inspect -f '{{(index (index .NetworkSettings.Ports "8100/tcp") 0).HostPort}}' agent-env-pool)
 ```
 
 Verify:
@@ -66,29 +89,13 @@ curl "$AGENT_ENV_POOL_URL/api/v1/servers"
 ```bash
 git clone https://github.com/uvheart/agent-env-pool.git
 cd agent-env-pool
-
-conda create -n agent-env-pool python=3.11 -y
-conda activate agent-env-pool
-
 pip install -r requirements.txt
-
 python -m agent_env_pool --host 0.0.0.0 --port 8100
-export AGENT_ENV_POOL_URL=http://127.0.0.1:8100
 ```
 
 ## Quickstart
 
-> **Prerequisites:** `agent-env-pool` is the scheduling layer only. Your sandbox image must already exist on the host.
-
-### Step 1 — Pull the browser sandbox image
-
-```bash
-docker pull zenika/alpine-chrome:124
-```
-
-> `zenika/alpine-chrome:124` exposes Chrome DevTools Protocol on `9222` with the command shown below. You can also use any custom image that exposes a CDP port.
-
-### Step 2 — Boot a browser sandbox
+### Boot a single container
 
 ```bash
 SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
@@ -100,157 +107,113 @@ SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
       {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
     ],
     "metadata": {
-      "command": [
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--remote-debugging-address=0.0.0.0",
-        "--remote-debugging-port=9222",
-        "about:blank"
-      ],
+      "command": ["--no-sandbox", "--remote-debugging-address=0.0.0.0", "--remote-debugging-port=9222", "about:blank"],
       "security_opt": ["seccomp=unconfined"]
     }
   }')
 
-echo $SERVER
-# Returns server_id, cdp_url, status, endpoints
+echo $SERVER | python3 -m json.tool
 ```
 
-### Step 3 — Run the E2E test
-
-The E2E test boots a browser sandbox, connects via CDP, renders a local test page, captures a screenshot, verifies the API, and shuts down cleanly.
+### Batch rollout — boot 10 containers at once
 
 ```bash
-# Install test dependencies (Option B only; Docker users still need these locally)
-pip install pytest pytest-asyncio
+ROLLOUT=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
+  -H 'content-type: application/json' \
+  -d '{
+    "count": 10,
+    "env_type": "browser-use",
+    "image": "zenika/alpine-chrome:124",
+    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
+  }')
 
-python -m pytest tests/test_e2e_browser.py -v -s
+ROLLOUT_ID=$(echo $ROLLOUT | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['rollout_id'])")
+
+# Check rollout status
+curl -s "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID" | python3 -m json.tool
+
+# Shut down all 10 at once
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
 
-Expected output:
+### Use any image
 
+```bash
+# Code-server with HTTP health check
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "custom",
+    "image": "codercom/code-server:latest",
+    "endpoints": [
+      {"name": "http", "container_port": 8080, "protocol": "http", "ready_check": {"type": "http", "path": "/"}}
+    ]
+  }'
+
+# Custom ML worker with TCP check
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
+  -H 'content-type: application/json' \
+  -d '{
+    "env_type": "custom",
+    "image": "my-ml-worker:latest",
+    "endpoints": [
+      {"name": "grpc", "container_port": 50051, "protocol": "tcp", "ready_check": {"type": "tcp"}}
+    ]
+  }'
 ```
-[BOOT]       server_id=...
-[BOOT]       cdp_url=http://127.0.0.1:XXXXX
-[CDP]        browser ready: Chrome/...
-[CDP]        ws_url=ws://127.0.0.1:XXXXX/devtools/browser/...
-[SCREENSHOT] saved tests/screenshot_baidu.png (87.x KB)
-[SHUTDOWN]   {'message': 'success'}
-PASSED
-```
 
-Screenshot is saved to `tests/screenshot_baidu.png`.
-
-CI and release E2E should use this full lifecycle path. Do not use pool acquire/reuse for release verification, because the release check must prove that a fresh sandbox can boot, serve CDP, run browser operations, and shut down cleanly.
-
-### Step 4 — Shut it down
+### Shut down
 
 ```bash
 SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['server_id'])")
 curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
 
-## API
+## API Reference
 
-### Boot a sandbox
+### Core endpoints
 
-```bash
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
-  -H 'content-type: application/json' \
-  -d '{
-    "env_type": "browser-use",
-    "image": "zenika/alpine-chrome:124",
-    "endpoints": [
-      {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
-    ]
-  }'
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/servers/boot` | Boot a single container |
+| `POST` | `/api/v1/servers/{id}/shutdown` | Shut down a container |
+| `GET` | `/api/v1/servers` | List all active containers |
+| `GET` | `/api/v1/servers/{id}` | Get container detail |
+| `GET` | `/api/v1/servers/{id}/logs` | Get container logs |
 
-Response fields: `server_id`, `status`, `cdp_url`, `endpoints[].host_port`, `endpoints[].url`.
+### Pool (acquire/release)
 
-Custom image with HTTP + TCP endpoints:
-
-```json
-{
-  "env_type": "custom",
-  "image": "my-sandbox:latest",
-  "endpoints": [
-    {"name": "api", "container_port": 8080, "protocol": "http", "ready_check": {"type": "http", "path": "/health"}},
-    {"name": "stream", "container_port": 9000, "protocol": "tcp", "ready_check": {"type": "tcp"}}
-  ]
-}
-```
-
-### Optional: Acquire & Release (pool reuse)
-
-This API is useful for long-running worker pools, but CI/release verification should use the direct boot/shutdown flow above so every run validates a fresh sandbox lifecycle.
-
-```bash
-# Optional pool API for long-running workers; do not use this in CI/release E2E.
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/pool/acquire" \
-  -H 'content-type: application/json' \
-  -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9222,"protocol":"cdp","ready_check":{"type":"cdp"}}],"metadata":{"command":["--no-sandbox","--remote-debugging-address=0.0.0.0","--remote-debugging-port=9222","about:blank"]}}'
-
-# Release back to the idle pool
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/pool/release/$SERVER_ID"
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/pool/acquire` | Acquire an idle container or boot a new one |
+| `POST` | `/api/v1/pool/release/{id}` | Release back to pool |
 
 ### Batch rollout
 
-```bash
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
-  -H 'content-type: application/json' \
-  -d '{
-    "count": 4,
-    "env_type": "browser-use",
-    "image": "zenika/alpine-chrome:124",
-    "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
-  }'
-
-curl "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID"
-curl -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
-```
-
-### List, inspect & logs
-
-```bash
-curl "$AGENT_ENV_POOL_URL/api/v1/servers"
-curl "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID"
-curl "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID/logs?tail=200"
-```
-
-All responses are wrapped with a trace ID:
-
-```json
-{"meta": {"trace_id": "..."}, "data": {}}
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/rollout/boot` | Boot N containers |
+| `GET` | `/api/v1/rollout/{rollout_id}` | Check rollout status |
+| `POST` | `/api/v1/rollout/{rollout_id}/shutdown` | Shut down entire rollout |
 
 ## Python SDK
 
 ```python
-import os
-
 from agent_env_pool import EnvPoolClient
 
-pool = EnvPoolClient(os.getenv("AGENT_ENV_POOL_URL", "http://127.0.0.1:8100"))
+pool = EnvPoolClient("http://127.0.0.1:8100")
 
-with pool.acquire(endpoints=[
+# Single container
+with pool.acquire(image="zenika/alpine-chrome:124", endpoints=[
     {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}
 ]) as env:
-    print(env.server_id)
-    print(env.cdp_url)   # connect your agent here
+    print(env.cdp_url)  # connect your agent here
+
+# Batch rollout
+rollout = pool.rollout_boot(count=20, image="my-worker:latest", endpoints=[...])
+print(f"Booted {len(rollout.server_ids)} workers")
+pool.rollout_shutdown(rollout.rollout_id)
 ```
-
-## Use Cases
-
-| Sandbox type | Image | Endpoint |
-|---|---|---|
-| Chrome / browser automation | `zenika/alpine-chrome:124` | CDP on `9222` |
-| Playwright / scraping | any | HTTP or WebSocket |
-| VS Code / code-server | `codercom/code-server` | HTTP |
-| VNC desktop | `dorowu/ubuntu-desktop-lxde-vnc` | TCP / WebSocket |
-| Agent CLI (Claude Code, Codex, Gemini, Qwen, Kimi) | custom | API / stream port |
-| RL training workers | custom | any |
 
 ## Lifecycle
 
@@ -260,7 +223,7 @@ starting → running → occupied → stopping → stopped
                         error
 ```
 
-`starting`, `running`, `occupied`, `stopping` all count against the active quota. Quota is enforced with a SQLite `BEGIN IMMEDIATE` transaction before Docker boot begins.
+Quota is enforced atomically via SQLite `BEGIN IMMEDIATE` before container creation begins. `starting`, `running`, `occupied`, `stopping` all count against the active quota (default: 32).
 
 ## Roadmap
 
