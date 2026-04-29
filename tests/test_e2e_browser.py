@@ -189,9 +189,8 @@ async def test_full_lifecycle(api: httpx.AsyncClient):
                     f"--remote-debugging-port={CDP_CONTAINER_PORT}",
                     "about:blank",
                 ],
-                "cap_add": ["SYS_ADMIN"],
-            },
-        })
+                "security_opt": ["seccomp=unconfined"],
+            },)
         assert boot_resp.status_code == 200, f"boot failed: {boot_resp.text}"
 
         body = boot_resp.json()
