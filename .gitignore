@@ -2,9 +2,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-agent_env_pool.db
+agent_env_pool*.db
 logs/
 artifacts/
+tests/screenshot_*.png
 
 web/node_modules/
 web/dist/

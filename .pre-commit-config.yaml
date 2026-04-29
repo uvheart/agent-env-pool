@@ -1,0 +1,17 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff lint
+        entry: python -m ruff check .
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: unit-test
+        name: unit / API smoke tests
+        entry: python -m pytest tests/test_api_smoke.py -q
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]
