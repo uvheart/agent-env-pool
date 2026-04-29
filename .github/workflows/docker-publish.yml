@@ -17,17 +17,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
-
       - name: Install dependencies
-        run: python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
+        run: python3 -m pip install --user -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
 
       - name: Compute image tags
         id: image
@@ -60,6 +51,7 @@ jobs:
       - name: Full lifecycle E2E
         env:
           AGENT_ENV_POOL_DATABASE_URL: sqlite+aiosqlite:///./agent_env_pool_release_${{ github.run_id }}.db
+          PYTHON: python3
         run: scripts/ci/e2e-full-lifecycle.sh
 
       - name: Log in to Docker Hub
