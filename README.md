@@ -30,17 +30,34 @@ No Python setup needed. Requires Docker.
 ```bash
 docker run -d \
   --name agent-env-pool \
-  -p 8100:8100 \
+  -p 127.0.0.1:8100:8100 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --add-host host.docker.internal:host-gateway \
   -e AGENT_ENV_POOL_DOCKER_READY_HOST=host.docker.internal \
   uvheart280/agent-env-pool:latest
+
+export AGENT_ENV_POOL_URL=http://127.0.0.1:8100
+```
+
+On shared hosts or CI runners where `8100` may already be in use, publish the
+container port to a random localhost port instead:
+
+```bash
+docker run -d \
+  --name agent-env-pool-smoke \
+  -p 127.0.0.1::8100 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --add-host host.docker.internal:host-gateway \
+  -e AGENT_ENV_POOL_DOCKER_READY_HOST=host.docker.internal \
+  uvheart280/agent-env-pool:latest
+
+export AGENT_ENV_POOL_URL=http://127.0.0.1:$(docker inspect -f '{{(index (index .NetworkSettings.Ports "8100/tcp") 0).HostPort}}' agent-env-pool-smoke)
 ```
 
 Verify:
 
 ```bash
-curl http://127.0.0.1:8100/api/v1/servers
+curl "$AGENT_ENV_POOL_URL/api/v1/servers"
 # {"meta":{"trace_id":"..."},"data":{"items":[],"total":0}}
 ```
 
@@ -56,6 +73,7 @@ conda activate agent-env-pool
 pip install -r requirements.txt
 
 python -m agent_env_pool --host 0.0.0.0 --port 8100
+export AGENT_ENV_POOL_URL=http://127.0.0.1:8100
 ```
 
 ## Quickstart
@@ -73,7 +91,7 @@ docker pull zenika/alpine-chrome:124
 ### Step 2 — Boot a browser sandbox
 
 ```bash
-SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
+SERVER=$(curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
@@ -91,6 +109,7 @@ SERVER=$(curl -s -X POST http://127.0.0.1:8100/api/v1/servers/boot \
         "about:blank"
       ],
       "security_opt": ["seccomp=unconfined"]
+    }
   }')
 
 echo $SERVER
@@ -122,11 +141,13 @@ PASSED
 
 Screenshot is saved to `tests/screenshot_baidu.png`.
 
+CI and release E2E should use this full lifecycle path. Do not use pool acquire/reuse for release verification, because the release check must prove that a fresh sandbox can boot, serve CDP, run browser operations, and shut down cleanly.
+
 ### Step 4 — Shut it down
 
 ```bash
 SERVER_ID=$(echo $SERVER | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['server_id'])")
-curl -s -X POST "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=true"
+curl -s -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID/shutdown?force=true"
 ```
 
 ## API
@@ -134,7 +155,7 @@ curl -s -X POST "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/shutdown?force=
 ### Boot a sandbox
 
 ```bash
-curl -X POST http://127.0.0.1:8100/api/v1/servers/boot \
+curl -X POST "$AGENT_ENV_POOL_URL/api/v1/servers/boot" \
   -H 'content-type: application/json' \
   -d '{
     "env_type": "browser-use",
@@ -160,22 +181,24 @@ Custom image with HTTP + TCP endpoints:
 }
 ```
 
-### Acquire & Release (pool reuse)
+### Optional: Acquire & Release (pool reuse)
+
+This API is useful for long-running worker pools, but CI/release verification should use the direct boot/shutdown flow above so every run validates a fresh sandbox lifecycle.
 
 ```bash
-# Reuses an idle sandbox if available, otherwise boots a new one
-curl -X POST http://127.0.0.1:8100/api/v1/pool/acquire \
+# Optional pool API for long-running workers; do not use this in CI/release E2E.
+curl -X POST "$AGENT_ENV_POOL_URL/api/v1/pool/acquire" \
   -H 'content-type: application/json' \
   -d '{"env_type":"browser-use","image":"zenika/alpine-chrome:124","endpoints":[{"name":"cdp","container_port":9222,"protocol":"cdp","ready_check":{"type":"cdp"}}],"metadata":{"command":["--no-sandbox","--remote-debugging-address=0.0.0.0","--remote-debugging-port=9222","about:blank"]}}'
 
 # Release back to the idle pool
-curl -X POST http://127.0.0.1:8100/api/v1/pool/release/$SERVER_ID
+curl -X POST "$AGENT_ENV_POOL_URL/api/v1/pool/release/$SERVER_ID"
 ```
 
 ### Batch rollout
 
 ```bash
-curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
+curl -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/boot" \
   -H 'content-type: application/json' \
   -d '{
     "count": 4,
@@ -184,16 +207,16 @@ curl -X POST http://127.0.0.1:8100/api/v1/rollout/boot \
     "endpoints": [{"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}]
   }'
 
-curl http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID
-curl -X POST "http://127.0.0.1:8100/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
+curl "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID"
+curl -X POST "$AGENT_ENV_POOL_URL/api/v1/rollout/$ROLLOUT_ID/shutdown?force=true"
 ```
 
 ### List, inspect & logs
 
 ```bash
-curl http://127.0.0.1:8100/api/v1/servers
-curl http://127.0.0.1:8100/api/v1/servers/$SERVER_ID
-curl "http://127.0.0.1:8100/api/v1/servers/$SERVER_ID/logs?tail=200"
+curl "$AGENT_ENV_POOL_URL/api/v1/servers"
+curl "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID"
+curl "$AGENT_ENV_POOL_URL/api/v1/servers/$SERVER_ID/logs?tail=200"
 ```
 
 All responses are wrapped with a trace ID:
@@ -205,9 +228,11 @@ All responses are wrapped with a trace ID:
 ## Python SDK
 
 ```python
+import os
+
 from agent_env_pool import EnvPoolClient
 
-pool = EnvPoolClient("http://127.0.0.1:8100")
+pool = EnvPoolClient(os.getenv("AGENT_ENV_POOL_URL", "http://127.0.0.1:8100"))
 
 with pool.acquire(endpoints=[
     {"name": "cdp", "container_port": 9222, "protocol": "cdp", "ready_check": {"type": "cdp"}}

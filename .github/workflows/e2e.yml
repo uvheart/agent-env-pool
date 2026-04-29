@@ -1,0 +1,46 @@
+name: E2E
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  full-lifecycle-e2e:
+    runs-on: [self-hosted, linux, x64, agent-env-pool-e2e]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
+
+      - name: Ensure browser sandbox image exists
+        run: docker image inspect zenika/alpine-chrome:124 >/dev/null || docker pull zenika/alpine-chrome:124
+
+      - name: Full lifecycle E2E
+        env:
+          AGENT_ENV_POOL_DATABASE_URL: sqlite+aiosqlite:///./agent_env_pool_e2e_${{ github.run_id }}.db
+        run: scripts/ci/e2e-full-lifecycle.sh
+
+      - name: Cleanup E2E database
+        if: always()
+        run: rm -f agent_env_pool_e2e_*.db
+
+      - name: Notify Feishu on failure
+        if: failure()
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: scripts/ci/notify-feishu.sh failure "agent-env-pool E2E failed"

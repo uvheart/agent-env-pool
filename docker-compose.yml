@@ -5,7 +5,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8100:8100"
+      # Override with AGENT_ENV_POOL_PORT_MAPPING=127.0.0.1::8100 on
+      # shared hosts or CI runners where host port 8100 may already be used.
+      - "${AGENT_ENV_POOL_PORT_MAPPING:-127.0.0.1:8100:8100}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
