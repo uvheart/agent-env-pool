@@ -190,7 +190,8 @@ async def test_full_lifecycle(api: httpx.AsyncClient):
                     "about:blank",
                 ],
                 "security_opt": ["seccomp=unconfined"],
-            },)
+            },
+        })
         assert boot_resp.status_code == 200, f"boot failed: {boot_resp.text}"
 
         body = boot_resp.json()
